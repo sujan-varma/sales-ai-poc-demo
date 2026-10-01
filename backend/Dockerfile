@@ -1,4 +1,4 @@
-# Sales AI backend (FastAPI). Build from the REPOSITORY ROOT, so the mobile app's web build can be included:
+# Sales AI backend (FastAPI). Build context is the REPOSITORY ROOT, so the mobile app's web build can be included:
 #   docker build -f backend/Dockerfile -t sales-ai-backend .
 FROM python:3.13-slim
 

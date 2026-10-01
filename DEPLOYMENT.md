@@ -1,13 +1,13 @@
 # Sales AI POC — Deployment Guide
 
-This guide covers building, configuring and running the Sales AI POC with Docker.
+This guide covers building, configuring and running the Sales AI POC with Docker. Every environment variable is described in **[ENVIRONMENT.md](ENVIRONMENT.md)**.
 
 ## 1. What you're deploying
 
 | Service | Tech | Image built from | Port | What it does |
 |---|---|---|---|---|
-| **backend** | Python 3.13, FastAPI, uvicorn | `backend/Dockerfile` | 8000 | Reads the Excel workbook into memory at startup and serves JSON APIs for the web app and the mobile app. It also serves the mobile web app at `/app/` and sends push notifications through Expo. |
-| **frontend** | Node 20, Next.js 14 (standalone server) | `Dockerfile` (repo root) | 3000 | The Sales AI web dashboard. It loads its data from the backend in the browser. |
+| **backend** | Python 3.13, FastAPI, uvicorn | `backend/Dockerfile` (build context: repo root) | 8000 | Reads the Excel workbook into memory at startup and serves JSON APIs for the web app and the mobile app. It also serves the mobile web app at `/app/` and sends push notifications through Expo. |
+| **frontend** | Node 20, Next.js 14 (standalone server) | `frontend/Dockerfile` (build context: `frontend/`) | 3000 | The Sales AI web dashboard. It loads its data from the backend in the browser. |
 
 ```
 Browser ──► frontend :3000  (pages, plus GET /runtime-config → { apiUrl })
@@ -27,7 +27,7 @@ There is no database. All data comes from `backend/data/Master data_Sales GenAI.
 ## 2. Prerequisites
 
 - Docker 24+ with BuildKit, and Docker Compose v2 for the compose route.
-- Each image is built from the **repository root**. Both Dockerfiles copy files from several folders.
+- Build contexts: the backend builds from the **repository root** (it also packs `mobile/app`). The frontend builds from **`frontend/`**.
 - Outbound HTTPS from the backend to `https://exp.host`. This is only needed for push notifications.
 
 ## 3. Quick start (single host, Docker Compose)
@@ -56,7 +56,7 @@ Run these from the repository root:
 
 ```bash
 docker build -f backend/Dockerfile -t <registry>/sales-ai-backend:<tag> .
-docker build -f Dockerfile         -t <registry>/sales-ai-frontend:<tag> .
+docker build -t <registry>/sales-ai-frontend:<tag> ./frontend
 docker push <registry>/sales-ai-backend:<tag>
 docker push <registry>/sales-ai-frontend:<tag>
 ```
@@ -66,41 +66,21 @@ With compose, set `REGISTRY=<registry>/` and `TAG=<tag>` in `deploy.env`, then r
 Build notes:
 - The frontend image takes no build arguments. The backend URL is a runtime setting (`API_URL`), so one image works in every environment.
 - The frontend runs `npm ci --include=dev`. The build needs Tailwind, PostCSS and TypeScript even if your CI sets `NODE_ENV=production`.
-- Each image is built from a single `.dockerignore` at the root. Secrets (`.env`, `deploy.env`), `node_modules`, `.next`, the Python virtualenv and docs are never copied into an image.
+- Each build context has its own `.dockerignore`: the root one for the backend, `frontend/.dockerignore` for the frontend. Secrets (`.env`, `.env.local`, `deploy.env`), `node_modules`, `.next`, the Python virtualenv and docs are never copied into an image.
 - The backend image includes the Excel workbook (27 MB).
 
 ## 5. Configuration
 
-### Backend (`sales-ai-backend`)
+The full reference, with defaults, per-environment values, a Kubernetes example and a go-live checklist, is **[ENVIRONMENT.md](ENVIRONMENT.md)**. The templates are [`backend/.env.example`](backend/.env.example), [`frontend/.env.example`](frontend/.env.example) and [`deploy.env.example`](deploy.env.example).
 
-| Variable | Required | Default | Description |
+The minimum for any deployment:
+
+| Service | Variable | Example | Notes |
 |---|---|---|---|
-| `API_KEY` | **yes** | – | Shared secret sent in the `X-API-Key` header for `POST /api/sales/reload`, `POST /api/notifications/send` and `GET /api/notifications/tokens`. While it's empty, those endpoints are locked. Store it as a secret. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
-| `CORS_ORIGINS` | yes (prod) | `*` | Comma-separated browser origins allowed to call the API, e.g. `https://sales-ai.example.com`. |
-| `EXPO_ACCESS_TOKEN` | no | – | Only needed if *Enhanced push security* is on for the Expo project. Store it as a secret. |
-| `NOTIFY_ON_RELOAD` | no | `true` | After a successful reload, push "Sales data updated" to every registered device. |
-| `DEFAULT_SALES_OFFICER` | no | `SO018` | The sales officer the mobile app shows by default. |
-| `APP_TODAY` | no | `2026-09-21` | The mobile app's "today". The workbook's actuals end on 20 Sep 2026. |
-| `EXCEL_PATH` | no | `/app/data/Master data_Sales GenAI.xlsx` | The workbook to serve. It's preset in the image; only change it if you mount the file somewhere else. |
-| `TOKENS_PATH` | no | `/app/state/tokens.json` | The push-token registry. Keep `/app/state` on a volume. |
-| `APP_STATIC_DIR` | no | `/app/mobile-app` | The mobile web app files, served at `/app/`. Preset in the image. |
-
-### Frontend (`sales-ai-frontend`)
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `API_URL` | **yes** | `http://localhost:8000` | The backend's URL **as the user's browser reaches it**, e.g. `https://sales-ai-api.example.com`. It's read at runtime and served to the browser by `GET /runtime-config`. |
-| `PORT` | no | `3000` | Listen port. |
-
-### Example production values
-
-```
-# backend
-API_KEY=<secret>
-CORS_ORIGINS=https://sales-ai.example.com
-# frontend
-API_URL=https://sales-ai-api.example.com
-```
+| backend | `API_KEY` | `<secret>` | **Secret.** Required for the reload and push endpoints. |
+| backend | `CORS_ORIGINS` | `https://sales-ai.example.com` | The web app's public origin. |
+| backend | `EXPO_ACCESS_TOKEN` | `<secret>` | **Secret.** Optional; only needed for Expo enhanced push security. |
+| frontend | `API_URL` | `https://sales-ai-api.example.com` | The backend URL as the **browser** reaches it. It's read at runtime, so no rebuild is needed. |
 
 ## 6. Reverse proxy / TLS
 
@@ -222,13 +202,16 @@ Both services log to stdout and stderr. View them with `docker compose logs -f b
 ## 12. Repository map (deployment-relevant)
 
 ```
-Dockerfile               frontend image
-backend/Dockerfile       backend image
-.dockerignore            shared build-context filter (repo root)
-docker-compose.yml       both services, the state volume and health-ordered startup
-deploy.env.example       variables for compose (copy to deploy.env)
+frontend/                Next.js web app (frontend/README.md)
+frontend/Dockerfile      frontend image (context: frontend/)
+frontend/.env.example    frontend variables
 backend/                 FastAPI app (backend/README.md: endpoints, local dev)
+backend/Dockerfile       backend image (context: repo root)
+backend/.env.example     backend variables
 backend/data/            the Excel workbook
 mobile/app/              mobile web app, served by the backend at /app/
-src/                     Next.js web app
+.dockerignore            build-context filter for the backend image
+docker-compose.yml       both services, the state volume and health-ordered startup
+deploy.env.example       variables for compose (copy to deploy.env)
+ENVIRONMENT.md           every environment variable, per environment
 ```

@@ -1,5 +1,7 @@
-# Shared by Dockerfile (frontend) and backend/Dockerfile — both build from the repository root.
+# Build context for backend/Dockerfile (docker build -f backend/Dockerfile .). The frontend has its own
+# frontend/.dockerignore because it builds from ./frontend.
 .git
+frontend
 **/node_modules
 .next
 out
@@ -18,7 +20,7 @@ backend/.venv
 backend/data/tokens.json
 deploy.env
 
-# not needed to build or run
+# not needed to build or run the backend
 .impeccable
 .claude
 archive

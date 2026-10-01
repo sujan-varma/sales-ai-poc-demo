@@ -1,5 +1,5 @@
-# Sales AI web app (Next.js). Build from the repository root:
-#   docker build -t sales-ai-frontend .
+# Sales AI web app (Next.js). Build context is the frontend/ folder:
+#   docker build -t sales-ai-frontend ./frontend
 # Runtime setting: API_URL = the backend's public URL as the browser reaches it (e.g. https://api.example.com).
 
 FROM node:20-alpine AS deps
