@@ -1,0 +1,44 @@
+# Sales AI — backend (FastAPI) + frontend (Next.js). See DEPLOYMENT.md.
+#   cp deploy.env.example deploy.env   # fill in API_KEY etc.
+#   docker compose --env-file deploy.env up -d --build
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: ${REGISTRY:-}sales-ai-backend:${TAG:-latest}
+    environment:
+      API_KEY: ${API_KEY:?set API_KEY in deploy.env}
+      EXPO_ACCESS_TOKEN: ${EXPO_ACCESS_TOKEN:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      NOTIFY_ON_RELOAD: ${NOTIFY_ON_RELOAD:-true}
+      DEFAULT_SALES_OFFICER: ${DEFAULT_SALES_OFFICER:-SO018}
+      APP_TODAY: ${APP_TODAY:-2026-09-21}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - backend-state:/app/state
+      # To serve an updated workbook without rebuilding, mount it over the baked-in copy, then POST /api/sales/reload:
+      # - ./data/Master data_Sales GenAI.xlsx:/app/data/Master data_Sales GenAI.xlsx:ro
+    restart: unless-stopped
+    mem_limit: 1g
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${REGISTRY:-}sales-ai-frontend:${TAG:-latest}
+    environment:
+      # the backend's URL as the user's BROWSER reaches it (not the container network name)
+      API_URL: ${API_URL:-http://localhost:8000}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 512m
+
+volumes:
+  backend-state:

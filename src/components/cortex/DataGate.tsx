@@ -4,7 +4,7 @@
 // page. The data modules (src/data) read the payload while they evaluate, so nothing renders on empty data.
 
 import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
-import { API_BASE, loadCortexData } from "@/data/source";
+import { apiUrl, loadCortexData } from "@/data/source";
 
 export type CortexView = "asm" | "leadership" | "thermometer-asm" | "thermometer-head" | "configuration" | "logs-activity" | "logs-priority";
 
@@ -63,9 +63,9 @@ export function DataGate({ view }: { view: CortexView }) {
       <Centered>
         <p className="text-[15px] font-medium text-cx-text">Couldn&apos;t load the sales data</p>
         <p className="max-w-md text-[13px] text-cx-muted">
-          {error} · {API_BASE}/api/web/bootstrap
+          {error} · {apiUrl()}/api/web/bootstrap
         </p>
-        <p className="max-w-md text-[12px] text-cx-faint">Start the backend (backend/README.md) or set NEXT_PUBLIC_API_URL, then try again.</p>
+        <p className="max-w-md text-[12px] text-cx-faint">Start the backend (backend/README.md) or set API_URL on the frontend server, then try again.</p>
         <button className="mt-2 rounded-md border border-cx-line px-4 py-2 text-[13px] text-cx-text hover:bg-cx-hover" onClick={() => setAttempt((n) => n + 1)}>
           Try again
         </button>

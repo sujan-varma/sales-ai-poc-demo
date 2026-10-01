@@ -67,3 +67,7 @@ How the data loads:
 - `src/components/cortex/DataGate.tsx` loads the payload before any page module is imported.
 - The original hardcoded files are kept for reference in `archive/static-data/`.
 - What the workbook doesn't contain is listed at `GET /api/web/data-gaps`.
+
+## Deployment
+
+Docker images for both services, a compose file and the step-by-step guide for DevOps are described in **[DEPLOYMENT.md](DEPLOYMENT.md)**.

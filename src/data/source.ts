@@ -10,7 +10,25 @@ declare global {
   var __CORTEX_DATA__: CortexData | undefined;
 }
 
+/** build-time fallback; at runtime the URL comes from /runtime-config (API_URL on the frontend server) */
 export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+
+let apiBase = API_BASE;
+/** the backend URL in use (after /runtime-config was read) */
+export const apiUrl = () => apiBase;
+
+async function resolveApiBase(): Promise<string> {
+  try {
+    const r = await fetch("/runtime-config", { cache: "no-store" });
+    if (r.ok) {
+      const j = (await r.json()) as { apiUrl?: string };
+      if (j.apiUrl) apiBase = j.apiUrl;
+    }
+  } catch {
+    // no runtime config (e.g. a static export): keep the build-time default
+  }
+  return apiBase;
+}
 
 /** One export from the backend payload, e.g. D("leadership", "REGIONS"). */
 export function D<T>(module: string, key: string): T {
@@ -31,7 +49,8 @@ let pending: Promise<CortexData> | null = null;
 export function loadCortexData(): Promise<CortexData> {
   if (globalThis.__CORTEX_DATA__) return Promise.resolve(globalThis.__CORTEX_DATA__);
   if (!pending) {
-    pending = fetch(`${API_BASE}/api/web/bootstrap`, { cache: "no-store" })
+    pending = resolveApiBase()
+      .then((base) => fetch(`${base}/api/web/bootstrap`, { cache: "no-store" }))
       .then(async (r) => {
         let j: { success?: boolean; data?: CortexData; error?: string };
         try {

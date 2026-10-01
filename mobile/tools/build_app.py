@@ -254,8 +254,8 @@ renderCat();render();
 /* ---------- loader: fetch the bootstrap from the backend, then start the app ---------- */
 (function(){
   const qs=new URLSearchParams(location.search);
-  // same origin when served by the backend (/app); otherwise the backend on port 8000 of the same host; ?api= overrides
-  const API=(qs.get('api')||(location.port==='8000'?location.origin:location.protocol+'//'+(location.hostname||'localhost')+':8000')).replace(/\\/$/,'');
+  // same origin when served by the backend (/app or port 8000); otherwise port 8000 of the same host; ?api= overrides
+  const API=(qs.get('api')||(location.port==='8000'||location.pathname.startsWith('/app')?location.origin:location.protocol+'//'+(location.hostname||'localhost')+':8000')).replace(/\\/$/,'');
   const so=qs.get('so');window.API_BASE=API;
   const box=document.getElementById('boot'),msg=document.getElementById('bootMsg'),err=document.getElementById('bootErr'),btn=document.getElementById('bootRetry');
   let started=false;

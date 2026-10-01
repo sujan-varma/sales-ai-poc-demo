@@ -1,0 +1,29 @@
+# Shared by Dockerfile (frontend) and backend/Dockerfile — both build from the repository root.
+.git
+**/node_modules
+.next
+out
+*.tsbuildinfo
+dist
+
+# python
+backend/.venv
+**/__pycache__
+**/*.pyc
+
+# secrets / runtime state — never bake into images
+**/.env
+**/.env.*
+!**/.env.example
+backend/data/tokens.json
+deploy.env
+
+# not needed to build or run
+.impeccable
+.claude
+archive
+docs
+mobile/mockups
+**/.DS_Store
+DEPLOYMENT.md
+docker-compose.yml

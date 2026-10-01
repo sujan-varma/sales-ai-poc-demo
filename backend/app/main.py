@@ -86,4 +86,6 @@ def health():
     if store.loaded:
         wb = store.workbook
         data.update(file=wb.path.name, sheets=len(wb.sheets), rows=wb.total_rows, loaded_at=wb.loaded_at)
-    return ApiResponse(success=store.loaded, data=data, error=None if store.loaded else "Excel data not loaded")
+    if not store.loaded:  # 503 so load balancers / orchestrators wait for the workbook
+        return JSONResponse(status_code=503, content=ApiResponse(success=False, data=data, error="Excel data not loaded").model_dump())
+    return ApiResponse(data=data)
