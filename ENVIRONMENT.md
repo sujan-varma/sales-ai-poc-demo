@@ -19,6 +19,7 @@ Store these in your secret manager (Vault, AWS Secrets Manager, a Kubernetes Sec
 | Variable | Service | Required | Purpose | How to create |
 |---|---|---|---|---|
 | `API_KEY` | backend | **Yes** | Clients send it as the `X-API-Key` header. It protects `POST /api/sales/reload`, `POST /api/notifications/send` and `GET /api/notifications/tokens`. | `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Use a different value in each environment. |
+| `VAPID_PRIVATE_KEY` | backend | No | Signs Web Push messages to the mobile app. If empty, a key is generated once into `VAPID_PATH`. Changing it makes every phone turn push on again. | `python -c "from py_vapid import Vapid; v=Vapid(); v.generate_keys(); print(v.private_pem().decode())"` |
 | `EXPO_ACCESS_TOKEN` | backend | No | Lets the backend send pushes through Expo when *Enhanced push security* is on for the Expo project. | expo.dev → Account settings → Access tokens → Create. Owned by the mobile team. |
 
 The frontend has no secrets.
@@ -35,6 +36,10 @@ The frontend has no secrets.
 | `EXPO_PUSH_URL` | No | `https://exp.host/--/api/v2/push/send` | same | The Expo push API endpoint. Only change it for a proxy or test double. The backend needs outbound HTTPS to it. |
 | `EXCEL_PATH` | No | `/app/data/Master data_Sales GenAI.xlsx` | `data/Master data_Sales GenAI.xlsx` | The workbook to serve. It's loaded once at startup (10–30 s) and again on `POST /api/sales/reload`. Absolute, or relative to `backend/`. |
 | `TOKENS_PATH` | No | `/app/state/tokens.json` | `data/tokens.json` | The registry of push tokens, which the API writes. It **must be on persistent storage**, so mount a volume or PVC at `/app/state`. |
+| `TRACKER_PATH` | No | `/app/state/tracker.json` | `data/tracker.json` | Assigned actions, status updates from the app and the notification inbox, written by the API. **Must be on persistent storage** (`/app/state`). |
+| `VAPID_PATH` | No | `/app/state/vapid.pem` | `data/vapid.pem` | Where the generated Web Push key is kept when `VAPID_PRIVATE_KEY` is empty. Keep it on persistent storage, or phones must turn push on again after a redeploy. |
+| `VAPID_SUBJECT` | No | `mailto:sales-ai@example.com` | same | Contact sent to the browser push services. Use a real `mailto:` or `https:` address. |
+| `REMINDER_INTERVAL_MINUTES` | No | `0` | `0` | Send due-today / overdue reminders for assigned actions every N minutes. `0` = off; call `POST /api/tracker/reminders/run` from a scheduler instead. |
 | `APP_STATIC_DIR` | No | `/app/mobile-app` | `../mobile/app` | The folder of the mobile web app, served at `/app/`. If the folder doesn't exist, that route is skipped. |
 | `NOTIFY_ON_RELOAD` | No | `true` | `true` | After a successful reload, push "Sales data updated" to every registered device. Accepts `true` or `false`. |
 | `DEFAULT_SALES_OFFICER` | No | `SO018` | `SO018` | The sales officer the mobile app shows when no `?so=` is given. Valid IDs are listed at `GET /api/app/sales-officers`. |

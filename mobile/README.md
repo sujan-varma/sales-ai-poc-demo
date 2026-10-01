@@ -4,6 +4,7 @@
 |---|---|
 | `mockups/` | The original UI mockup (static, hardcoded data). Kept as the design reference and not edited. |
 | `app/` | The working app. This is the mockup with every data set fetched from the backend (`GET /api/app/bootstrap`), all of it built from the Excel file. The menu's **Data Sources** item lists what the Excel file doesn't have. It is generated, so don't edit it by hand. |
+| `pwa/` | Service worker, web app manifest and icon for push notifications. Copied into `app/` by the build. |
 | `tools/build_app.py` | Builds `app/index.html` from the mockup. Run it again after changing the mockup: `python mobile/tools/build_app.py` |
 
 ## Run
@@ -22,4 +23,12 @@
 2. It then starts the UI with that data.
 3. If the request fails, the page shows the error with a **Try again** button.
 
-Actions you take in the app (check-in, completing actions, orders) are kept in memory only for now. A reload starts again from the backend data.
+Starting, updating and completing an action is saved to the backend (`POST /api/tracker/actions/{id}/events`), and so is notification read state. Check-ins, orders and follow-up actions created in the app are still kept in memory only, so a reload starts them again from the backend data.
+
+## Notifications
+
+- **Assigned actions.** When the ASM assigns an action in the web app, it appears in the bell, the Action Tracker and Today's Priorities. While the app is open it checks `GET /api/app/inbox` every 20 s, and immediately when a push arrives. Tapping a notification opens the action.
+- **Push.** The menu's **Notifications** item turns push on or off for the phone; the app also asks once on first launch. `pwa/sw.js` is the service worker that shows the push and opens the action when it is tapped. `pwa/manifest.webmanifest` lets iPhones add the app to the Home Screen, which iOS requires for push.
+- Push needs HTTPS (or `http://localhost`). See *Web Push* in `backend/README.md`.
+
+`build_app.py` copies `pwa/` next to `app/index.html`.

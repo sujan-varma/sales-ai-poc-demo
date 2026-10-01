@@ -15,6 +15,7 @@ import { AgentIcon, MonoAgentIcons } from "./primitives";
 import { PulseStatusPalette } from "./statusPalette";
 import { ThemeRoot, ThemeToggle, useTheme } from "./theme";
 import { useCortexNav } from "./nav";
+import { AssignmentsProvider } from "./assignments";
 import covasantWordmark from "@/assets/brand/covasant-wordmark.png";
 import covasantMark from "@/assets/brand/covasant-mark.png";
 
@@ -34,12 +35,14 @@ export function CortexPageRoot({ children }: { children: React.ReactNode }) {
     <ThemeRoot scope="cx-b" storageKey="cortex-b-theme">
       <BrandProvider name="Sales AI">
         <HomeProvider>
-          <AiStyleProvider value="capsule">
-            {/* agent icons are monotone grey everywhere in Option B — told apart by shape */}
-            <MonoAgentIcons>
-              <PulseStatusPalette>{children}</PulseStatusPalette>
-            </MonoAgentIcons>
-          </AiStyleProvider>
+          <AssignmentsProvider>
+            <AiStyleProvider value="capsule">
+              {/* agent icons are monotone grey everywhere in Option B — told apart by shape */}
+              <MonoAgentIcons>
+                <PulseStatusPalette>{children}</PulseStatusPalette>
+              </MonoAgentIcons>
+            </AiStyleProvider>
+          </AssignmentsProvider>
         </HomeProvider>
       </BrandProvider>
     </ThemeRoot>

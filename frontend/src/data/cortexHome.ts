@@ -262,7 +262,8 @@ export const WIDGET_OPTIONS = [
 // My actions vs team actions
 // ---------------------------------------------------------------------------
 
-export const OFFICERS = C<{ name: string; territories: string; share: number }[]>("OFFICERS");
+/** Sales officers under the ASM; `id` is the workbook's Sales officer ID (SO018). */
+export const OFFICERS = C<{ id?: string; name: string; territories: string; share: number }[]>("OFFICERS");
 
 export interface ActionItem {
   id: string;
@@ -272,6 +273,9 @@ export interface ActionItem {
   status: ActionStatus;
   source: AgentId;
   hoursAgo: number;
+  /** retailer-level items: the workbook retailer and signal they came from */
+  retailerId?: string;
+  kind?: string;
 }
 
 export const ACTION_ITEMS = C<ActionItem[]>("ACTION_ITEMS");
@@ -322,6 +326,10 @@ export interface SuggestedAction {
   why: string;
   confidence: Confidence;
   run: AgentRun;
+  /** the workbook retailer + signal behind the suggestion, and the officer who serves that retailer */
+  retailerId?: string;
+  kind?: string;
+  suggestedOwner?: string;
 }
 
 export const SUGGESTED_ACTIONS = C<SuggestedAction[]>("SUGGESTED_ACTIONS");

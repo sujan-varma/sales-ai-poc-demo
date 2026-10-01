@@ -166,7 +166,7 @@ class _Org:
             c, p, o = cr.get(rid, {}), pj.get(rid, {}), lg.get(rid, {})
             ach = p.get("MTD achiev % / Total")
             self.facts.append({
-                "rid": rid, "name": r["retailer_name"], "asm": r["ASM Name"], "terr": r["Territory"], "so": r["Sales officer name"],
+                "rid": rid, "name": r["retailer_name"], "asm": r["ASM Name"], "terr": r["Territory"], "so": r["Sales officer name"], "so_id": str(r["Sales officer ID"]),
                 "dist_id": r["Distributor ID"], "dist": r["Distributor Name"], "type": r["Type of Outlet"], "cls": r["Outlet Class"],
                 "new": r["New/old"] == "New", "onboarded": _date(r["Onboarded On"]), "micro": r["Micro Market"],
                 "visit": _date(r["SO Last visit date"]), "vtime": r["SO Last visit time"] if isinstance(r["SO Last visit time"], str) else None,
@@ -397,11 +397,13 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
     for so, n in so_counts.most_common(6):
         ts = sorted({f["terr"] for f in my if f["so"] == so})
         acts = sum(1 for f, _ in my_rows if f["so"] == so)
-        officers.append({"name": so, "territories": ", ".join(ts), "share": round(acts / max(1, len(my_rows)) * 100)})
+        so_id = next(f["so_id"] for f in my if f["so"] == so)
+        officers.append({"id": so_id, "name": so, "territories": ", ".join(ts), "share": round(acts / max(1, len(my_rows)) * 100)})
     action_items = [{"id": a["id"], "title": a["title"], "territory": a["territory"], "owner": A, "status": a["status"], "source": a["agent"], "hoursAgo": 24 + i * 3}
                     for i, a in enumerate(asm_actions[:8])]
     for i, (f, s) in enumerate(sorted(my_rows, key=lambda x: -x[1]["value"])[:10]):
-        action_items.append({"id": f"act-t{i + 1}", "title": f"{s['title']} · {f['name']}", "territory": f["terr"], "owner": f["so"], "status": status_of(s), "source": s["agent"], "hoursAgo": 24 + i * 5})
+        action_items.append({"id": f"act-t{i + 1}", "title": f"{s['title']} · {f['name']}", "territory": f["terr"], "owner": f["so"], "status": status_of(s), "source": s["agent"], "hoursAgo": 24 + i * 5,
+                             "retailerId": f["rid"], "kind": s["kind"]})
 
     # monthly signal history: retailers under 80% of target each month (opened); no completion data
     def action_months(fs):
@@ -848,6 +850,7 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
     suggested = []
     for i, (f, s) in enumerate(sorted(my_rows, key=lambda x: -x[1]["value"])[:4]):
         suggested.append({"id": f"sug-{i + 1}", "title": f"{s['title']} · {f['name']}", "territory": f["terr"], "source": s["agent"],
+                          "retailerId": f["rid"], "kind": s["kind"], "suggestedOwner": f["so"], "suggestedOwnerId": f["so_id"],
                           "why": f"From the workbook: {s['signal'].lower()} signal for {f['name']}", "confidence": recs[0]["confidence"] if recs else THERMO_SET_CONFIDENCE,
                           "run": {"agent": s["agent"], "steps": ["reading the signal", "creating the action"], "result": f"Added to your Tracker — {f['so']} suggested as owner", "link": "View in Tracker"}})
     INSIGHT_ACTIONS = {}

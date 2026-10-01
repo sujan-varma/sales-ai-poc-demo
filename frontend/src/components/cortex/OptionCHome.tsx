@@ -75,6 +75,7 @@ import { ConsoleAgentRow, InsightsSheet, weakest } from "./consoleSections";
 import { MapPanel } from "./sections";
 import { AgentIcon, CortexMark, StatusBadge } from "./primitives";
 import { CortexPageRoot, PageFrame, Persona, useOutside } from "./shell";
+import { assignToast, assignmentLine, useAssignments } from "./assignments";
 import { useCortexNav } from "./nav";
 import { SuggestedOutcome } from "./actionTrace";
 import { ACTION_TRACES, REC_SUGGESTED, ROUTE_DONE_LABEL } from "@/data/actionTraces";
@@ -713,11 +714,15 @@ type ActionGroup = "mine" | "owner" | "suggested";
 
 /** My-actions state, shared by the filter pills (beside the tabs) and the list beneath. */
 function useMyActions() {
-  const { routes } = useHome();
+  const { routes, toast } = useHome();
+  const nt = useAssignments();
   const [group, setGroup] = useState<ActionGroup>("suggested");
-  const [assigned, setAssigned] = useState<Record<string, string>>({});
-  const [adding, setAdding] = useState<Record<string, string>>({}); // suggestion id → assignee
+  const [pending, setPending] = useState<Record<string, string>>({}); // item id → assignee, while the request runs
   const [dismissed, setDismissed] = useState<string[]>([]);
+
+  // what is already assigned comes from the backend, so it survives a reload and shows on every device
+  const saved = Object.fromEntries(Object.entries(nt.assigned).map(([src, a]) => [src, a.assignee.type === "asm" ? "Me" : a.assignee.name]));
+  const adding: Record<string, string> = { ...saved, ...pending };
 
   const mine = ACTION_ITEMS.filter((a) => a.owner === LBL.asmName && a.status !== "unassigned").sort((a, b) => a.hoursAgo - b.hoursAgo);
   const routedIn = RECOMMENDATIONS.filter((r) => routes[r.id]?.includes("tracker")).map((r) => ({
@@ -726,15 +731,32 @@ function useMyActions() {
     territory: r.territory,
     source: "thermometer" as AgentId,
     hoursAgo: 0,
+    retailerId: undefined as string | undefined,
+    kind: undefined as string | undefined,
   }));
-  const needOwner = [...routedIn, ...ACTION_ITEMS.filter((a) => a.owner === LBL.asmName && a.status === "unassigned")].filter((a) => !assigned[a.id]);
+  const needOwner = [...routedIn, ...ACTION_ITEMS.filter((a) => a.owner === LBL.asmName && a.status === "unassigned")].filter((a) => !adding[a.id]);
   const suggested = SUGGESTED_ACTIONS.filter((x) => !dismissed.includes(x.id));
   const counts: Record<ActionGroup, number> = {
     mine: mine.length + Object.values(adding).filter((w) => w === "Me").length,
     owner: needOwner.length,
-    suggested: suggested.length - Object.keys(adding).length,
+    suggested: suggested.filter((x) => !adding[x.id]).length,
   };
-  return { group, setGroup, mine, needOwner, suggested, counts, assigned, setAssigned, adding, setAdding, setDismissed };
+
+  /** Assign in the backend: stores the action and notifies the officer's mobile app. */
+  const assign = (x: { id: string; title: string; territory: string; source: AgentId; retailerId?: string; kind?: string }, who: string) => {
+    const done = () =>
+      setPending((p) => {
+        const n = { ...p };
+        delete n[x.id];
+        return n;
+      });
+    setPending((p) => ({ ...p, [x.id]: who }));
+    nt.assign({ source_id: x.id, title: x.title, territory: x.territory, agent: x.source, kind: x.kind, retailer_id: x.retailerId, assignee: who })
+      .then((r) => toast(assignToast(who, r)))
+      .catch((e: Error) => toast(`Couldn't assign: ${e.message}`))
+      .finally(done);
+  };
+  return { group, setGroup, mine, needOwner, suggested, counts, adding, assign, setDismissed };
 }
 type MyActions = ReturnType<typeof useMyActions>;
 
@@ -767,7 +789,7 @@ function MyActionPills({ m }: { m: MyActions }) {
 }
 
 function MyActionsList({ m }: { m: MyActions }) {
-  const { toast } = useHome();
+  const nt = useAssignments();
   // on narrow screens the controls wrap under the title instead of squeezing it
   const row = "flex flex-wrap items-start gap-x-3 gap-y-2 border-b border-cx-line py-3 last:border-0 [&>span:nth-child(2)]:basis-[200px]";
   const people = ["Me", ...OFFICERS.map((o) => o.name)];
@@ -810,11 +832,7 @@ function MyActionsList({ m }: { m: MyActions }) {
                 allOption={false}
                 value={null}
                 options={OFFICERS.map((o) => o.name)}
-                onChange={(v) => {
-                  if (!v) return;
-                  m.setAssigned((x) => ({ ...x, [a.id]: v }));
-                  toast(`Assigned to ${v}. It appears in their SFA app.`);
-                }}
+                onChange={(v) => v && m.assign(a, v)}
               />
             </li>
           ))}
@@ -822,8 +840,10 @@ function MyActionsList({ m }: { m: MyActions }) {
         {m.group === "suggested" &&
           m.suggested.slice(0, 6).map((x) => {
             const who = m.adding[x.id];
+            const sent = nt.assigned[x.id];
+            const line = assignmentLine(sent, sent && nt.delivery[sent.id]);
             return (
-              <li key={x.id} className={row}>
+              <li id={x.id} key={x.id} className={row}>
                 <AgentIcon agent={x.source} size="sm" />
                 <span className="min-w-0 flex-1">
                   <span className="block text-[13px] leading-snug text-cx-text">{x.title}</span>
@@ -835,6 +855,7 @@ function MyActionsList({ m }: { m: MyActions }) {
                       <AgentRunChip run={{ ...x.run, result: `Assigned to ${who === "Me" ? "you" : who} and added to Tracker`, link: "View in Tracker" }} />
                     </span>
                   )}
+                  {line && <span className="mt-1.5 block text-[11px] text-cx-faint">{line}{sent ? ` · ${sent.id}` : ""}</span>}
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
                   {!who && (
@@ -848,7 +869,7 @@ function MyActionsList({ m }: { m: MyActions }) {
                         <X className="h-3.5 w-3.5" />
                       </button>
                       {/* assigning is part of the same action, not a separate step */}
-                      <Dropdown label="Assign & Add to Tracker" placeholder="" allOption={false} value={null} options={people} onChange={(v) => v && m.setAdding((a) => ({ ...a, [x.id]: v }))} />
+                      <Dropdown label="Assign & Add to Tracker" placeholder="" allOption={false} value={null} options={people} onChange={(v) => v && m.assign(x, v)} />
                     </>
                   )}
                   <ConfidenceScore confidence={x.confidence} align="right" />

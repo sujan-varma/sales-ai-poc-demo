@@ -12,6 +12,8 @@ class Settings(BaseSettings):
 
     excel_path: Path = BASE_DIR / "data" / "Master data_Sales GenAI.xlsx"
     tokens_path: Path = BASE_DIR / "data" / "tokens.json"
+    # Assigned actions, status changes from the app and the notification inbox (JSON, written by the API).
+    tracker_path: Path = BASE_DIR / "data" / "tracker.json"
 
     # Protects POST /api/sales/reload and POST /api/notifications/send. Empty = those endpoints are locked.
     api_key: str = ""
@@ -19,6 +21,14 @@ class Settings(BaseSettings):
     # Expo Push API. The access token is optional unless "enhanced push security" is on in your Expo project.
     expo_push_url: str = "https://exp.host/--/api/v2/push/send"
     expo_access_token: str = ""
+
+    # Web Push (the mobile web app). Private key as PEM text; empty = generated once and kept in vapid_path.
+    vapid_private_key: str = ""
+    vapid_path: Path = BASE_DIR / "data" / "vapid.pem"
+    vapid_subject: str = "mailto:sales-ai@example.com"
+
+    # Due / overdue reminders for assigned actions, every N minutes. 0 = off (POST /api/tracker/reminders/run instead).
+    reminder_interval_minutes: int = 0
 
     # Comma-separated list, or "*" for any origin.
     cors_origins: str = "*"
