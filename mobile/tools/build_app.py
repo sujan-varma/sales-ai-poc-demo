@@ -277,6 +277,110 @@ renderCat();render();
 })();
 </script>""")
 
+# ------------------------------------------------------------------ notifications: backend inbox, Web Push, status sync
+# Actions the ASM assigns in the web app arrive here as notifications (a push when it's turned on, and the bell while
+# the app is open). Start / update / complete is sent back to the backend, which notifies the ASM. Read state is saved.
+
+rep("<title>BCG Field Sales</title>", """<title>BCG Field Sales</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#3d9aa3">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.png">""")
+rep('  <button onclick="closeAll();showGaps()">Data Sources</button>\n</div>',
+    '  <button onclick="closeAll();pushSettings()">Notifications</button>\n  <button onclick="closeAll();showGaps()">Data Sources</button>\n</div>')
+rep("function showGaps(){", r"""/* ---------- notifications: backend inbox + push + status sync ---------- */
+const API=window.API_BASE,SO=B.sales_officer.id;
+function apiJ(p,o){return fetch(API+p,Object.assign({cache:'no-store',headers:{'Content-Type':'application/json'}},o||{}))
+  .then(r=>r.json().catch(()=>{throw new Error('HTTP '+r.status)})).then(j=>{if(!j.success)throw new Error(j.error||'Request failed');return j.data})}
+Object.assign(NK,{new:'NEW ACTION ASSIGNED',due:'ACTION DUE TODAY',overdue:'ACTION OVERDUE',started:'ACTION STARTED',comment:'ACTION UPDATE',completed:'ACTION COMPLETED'});
+const _notifLine=notifLine;
+notifLine=function(n,a){return n.k==='new'||!n.title?_notifLine(n,a):n.title};
+const linkVisit=a=>{if(!a.visitId&&a.retailer_id){const v=VISITS.find(v=>v.retailer_id===a.retailer_id&&v.state==='scheduled');if(v)a.visitId=v.id}};
+ACTS.forEach(a=>{if(a.src&&!SRC.includes(a.src))SRC.push(a.src)});
+
+// new notifications (and the assigned actions they point to) while the app is open
+let inboxSince=B.inbox_since||0,polling=false;
+async function pollInbox(){if(polling)return;polling=true;
+  try{const d=await apiJ('/api/app/inbox?so='+encodeURIComponent(SO)+'&since='+inboxSince);
+    inboxSince=d.since;Object.assign(U,d.users||{});
+    d.actions.forEach(a=>{linkVisit(a);if(!SRC.includes(a.src))SRC.push(a.src);const i=ACTS.findIndex(x=>x.id===a.id);if(i<0)ACTS.unshift(a);else if(ACTS[i].st==='owner')ACTS[i]=a});
+    const fresh=d.notifications.filter(n=>!NOTIFS.some(x=>x.id===n.id));
+    fresh.forEach(n=>NOTIFS.unshift(n));
+    if(fresh.length){const n=fresh[fresh.length-1],a=byId(n.aid);toast(fresh.length>1?fresh.length+' new notifications':n.title+(a?' · '+a.title:''));refreshAll()}
+  }catch(e){}finally{polling=false}}
+
+// read state is kept by the backend, so the bell is the same after a reload
+const sentRead=new Set(NOTIFS.filter(n=>n.read).map(n=>n.id));
+const _sync=sync;
+sync=function(){_sync();const ids=NOTIFS.filter(n=>n.read&&n.id&&!sentRead.has(n.id)).map(n=>n.id);
+  if(ids.length){ids.forEach(i=>sentRead.add(i));apiJ('/api/notifications/inbox/read',{method:'POST',body:JSON.stringify({user:SO,ids})}).catch(()=>ids.forEach(i=>sentRead.delete(i)))}};
+
+// every start / update / complete goes through logA: save it, so the ASM is told and it survives a reload
+const _logA=logA;
+logA=function(a,t,txt){_logA(a,t,txt);
+  if(role!=='ajay'||a.to!=='ajay'||!(a.assigned||a.retailer_id)||!['started','comment','complete'].includes(t))return; // local-only (follow-ups, AI visit)
+  const body={so:SO,type:t,text:txt||null};
+  if(t==='complete'&&a.outcome)body.outcome=a.outcome;
+  if(!a.assigned)Object.assign(body,{retailer_id:a.retailer_id,signal:a.signal,title:a.title});
+  apiJ('/api/tracker/actions/'+encodeURIComponent(a.id)+'/events',{method:'POST',body:JSON.stringify(body)}).catch(e=>toast('Not saved: '+e.message))};
+
+// open an action from a notification tap (service worker) or a #a=<id> link
+async function openFromPush(aid){if(!aid)return;if(!byId(aid))await pollInbox();if(!byId(aid))return;
+  NOTIFS.forEach(n=>{if(n.aid===aid)n.read=true});openAction(aid);sync()}
+
+// Web Push needs HTTPS (or localhost); on iPhone the app must be added to the Home Screen first
+const PUSH_OK='serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window&&window.isSecureContext;
+const IOS=/iPhone|iPad|iPod/.test(navigator.userAgent),STANDALONE=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}},lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
+const b64u=s=>{const p='='.repeat((4-s.length%4)%4),b=atob((s+p).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(b,c=>c.charCodeAt(0))};
+let pushOn=false;
+const swReg=()=>navigator.serviceWorker.register('sw.js').then(()=>navigator.serviceWorker.ready);  // subscribe needs an active worker
+async function enablePush(ask){
+  if(!PUSH_OK)return ask&&pushSettings();
+  try{const reg=await swReg();let perm=Notification.permission;
+    if(perm==='default'&&ask)perm=await Notification.requestPermission();
+    if(perm!=='granted'){pushOn=false;if(ask)toast(perm==='denied'?'Notifications are blocked in this browser\'s settings':'Notifications not turned on');return}
+    const key=(await apiJ('/api/notifications/webpush/key')).publicKey;
+    let sub=await reg.pushManager.getSubscription();
+    if(sub&&lsGet('pushKey')!==key){await sub.unsubscribe();sub=null}  // the server's key changed
+    if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64u(key)});
+    lsSet('pushKey',key);
+    await apiJ('/api/notifications/webpush/subscribe',{method:'POST',body:JSON.stringify({subscription:sub.toJSON(),user:SO,platform:IOS?'ios':/Android/.test(navigator.userAgent)?'android':'web'})});
+    pushOn=true;if(ask){toast('Push notifications are on');closeAll()}
+  }catch(e){pushOn=false;if(ask)toast('Could not turn on push: '+e.message);else console.warn('push:',e)}}
+async function disablePush(){try{const reg=await swReg(),sub=await reg.pushManager.getSubscription();
+  if(sub){await apiJ('/api/notifications/unregister',{method:'POST',body:JSON.stringify({token:sub.endpoint})}).catch(()=>{});await sub.unsubscribe()}}catch(e){}
+  pushOn=false;closeAll();toast('Push notifications are off')}
+function pushSettings(){
+  let st,act='';
+  if(!PUSH_OK&&IOS&&!STANDALONE)st='On iPhone, push works once the app is on your Home Screen: tap Share, then <b>Add to Home Screen</b>, open it from there and come back here.';
+  else if(!PUSH_OK)st='Push needs the app to be opened over <b>HTTPS</b> (it is on '+esc(location.origin)+'). New actions still appear in the bell while the app is open.';
+  else if(Notification.permission==='denied')st='Notifications are blocked for this site. Allow them in the browser\'s site settings, then come back here.';
+  else if(pushOn){st='Push is on for this phone. You get a notification when your ASM assigns you an action, and when an assigned action is due or overdue.';act=`<button class="btn out" onclick="disablePush()">Turn Off</button>`}
+  else{st='Get a notification on this phone when your ASM assigns you an action, and when an assigned action is due or overdue.';act=`<button class="btn pri" onclick="enablePush(true)">Turn On Notifications</button>`}
+  sheetHTML(`<h4>Notifications</h4><p class="sp">${st}</p>${act}`)}
+
+function startNotifications(){
+  setInterval(()=>{if(document.visibilityState==='visible')pollInbox()},20000);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')pollInbox()});
+  if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('message',e=>{const m=e.data||{};
+    if(m.type==='push')pollInbox();else if(m.type==='open')openFromPush(m.aid)});
+  const m=location.hash.match(/^#a=(.+)$/);
+  if(m){history.replaceState(null,'',location.pathname+location.search);openFromPush(decodeURIComponent(m[1]))}
+  if(PUSH_OK&&Notification.permission==='granted')enablePush(false);   // keep this phone's subscription current
+  else if(PUSH_OK&&Notification.permission==='default'&&!lsGet('pushAsked')){lsSet('pushAsked','1');
+    setTimeout(()=>sheetHTML(`<h4>Turn on notifications?</h4><p class="sp">Get a notification when your ASM assigns you an action, and when an assigned action is due or overdue.</p>
+      <div class="two"><button class="btn out" onclick="closeAll()">Not Now</button><button class="btn pri" onclick="enablePush(true)">Turn On</button></div>`),1500)}
+}
+function showGaps(){""")
+rep("renderCat();render();\n</script>\n<script>", "renderCat();render();\nstartNotifications();\n</script>\n<script>")
+
 OUT.parent.mkdir(parents=True, exist_ok=True)
 OUT.write_text(html, encoding="utf-8")
+
+# service worker, manifest and icon for push + "Add to Home Screen" (served next to index.html at /app/)
+for f in (ROOT / "pwa").iterdir():
+    (OUT.parent / f.name).write_bytes(f.read_bytes())
 print(f"wrote {OUT} ({len(html) // 1024} KB)")

@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.config import get_settings
 from app.routers.sales import _workbook
 from app.schemas import ApiResponse
-from app.services import field_app
+from app.services import field_app, tracker
 
 router = APIRouter(prefix="/api/app", tags=["mobile app"])
 
@@ -26,11 +26,31 @@ def bootstrap(
 ):
     settings = get_settings()
     wb = _workbook()
+    day = today or settings.app_today
     try:
-        data = field_app.build_bootstrap(wb, so or settings.default_sales_officer, today or settings.app_today)
+        data = field_app.build_bootstrap(wb, so or settings.default_sales_officer, day)
     except field_app.NotFound as e:
         raise HTTPException(404, str(e))
+    data = tracker.merge_into_bootstrap(data, day)
     return ApiResponse(data=data, total=len(data["visits"]) + len(data["actions"]))
+
+
+@router.get(
+    "/inbox",
+    response_model=ApiResponse[dict[str, Any]],
+    summary="New notifications for the app since a time, with the assigned actions they point to",
+    description="The app polls this while it is open. `since` is ms since epoch; pass back `data.since` next time.",
+)
+def inbox(
+    so: Optional[str] = Query(None, description="Sales officer ID or name. Default from .env"),
+    since: int = Query(0, ge=0),
+):
+    settings = get_settings()
+    try:
+        data = tracker.app_inbox(_workbook(), so or settings.default_sales_officer, since, settings.app_today)
+    except tracker.TrackerError as e:
+        raise HTTPException(e.status, str(e))
+    return ApiResponse(data=data, total=len(data["notifications"]))
 
 
 @router.get("/data-gaps", response_model=ApiResponse[list[dict[str, str]]], summary="What the workbook cannot provide")

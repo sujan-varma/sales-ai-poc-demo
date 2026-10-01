@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -9,8 +10,9 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
-from app.routers import app_data, notifications, sales, web_data
+from app.routers import app_data, notifications, sales, tracker, web_data
 from app.schemas import ApiResponse
+from app.services import tracker as tracker_service
 from app.services.excel_data import store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -27,7 +29,22 @@ async def lifespan(app: FastAPI):
         log.exception("Could not load the Excel file at startup")
     if not settings.api_key:
         log.warning("API_KEY is empty: /api/sales/reload and /api/notifications/send are locked")
+    task = asyncio.create_task(_reminder_loop(settings.reminder_interval_minutes)) if settings.reminder_interval_minutes > 0 else None
     yield
+    if task:
+        task.cancel()
+
+
+async def _reminder_loop(minutes: int) -> None:
+    """Due-today / overdue reminders for assigned actions, every REMINDER_INTERVAL_MINUTES."""
+    while True:
+        try:
+            sent = await tracker_service.run_reminders(get_settings().app_today)
+            if sent:
+                log.info("Sent %d action reminders", len(sent))
+        except Exception:
+            log.exception("Reminder run failed")
+        await asyncio.sleep(minutes * 60)
 
 
 app = FastAPI(title="Sales GenAI backend", version="0.1.0", lifespan=lifespan)
@@ -66,6 +83,7 @@ async def unhandled_error(_: Request, exc: Exception):
 
 app.include_router(sales.router)
 app.include_router(notifications.router)
+app.include_router(tracker.router)
 app.include_router(app_data.router)
 app.include_router(web_data.router)
 

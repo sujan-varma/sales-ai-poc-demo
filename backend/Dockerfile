@@ -18,7 +18,7 @@ COPY ["backend/data/Master data_Sales GenAI.xlsx", "./data/"]
 # The mobile app's web build, served at /app
 COPY mobile/app ./mobile-app
 
-# Non-root user; /app/state holds the push-token registry (mount a volume there to keep it across restarts)
+# Non-root user; /app/state holds push tokens, the action tracker and the VAPID key (mount a volume there to keep it across restarts)
 RUN useradd --system --uid 10001 --no-create-home appuser \
     && mkdir -p /app/state \
     && chown appuser /app/state
@@ -26,6 +26,8 @@ USER appuser
 
 ENV EXCEL_PATH="/app/data/Master data_Sales GenAI.xlsx" \
     TOKENS_PATH=/app/state/tokens.json \
+    TRACKER_PATH=/app/state/tracker.json \
+    VAPID_PATH=/app/state/vapid.pem \
     APP_STATIC_DIR=/app/mobile-app
 
 EXPOSE 8000
