@@ -1,0 +1,283 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom crisp scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Cortex Home wireframes — theme variables (RGB triplets).
+   Defaults = original dark palette (Option B uses these unchanged). */
+:root {
+  --cx-bg: 9 9 11;
+  --cx-panel: 17 17 19;
+  --cx-raised: 24 24 27;
+  --cx-hover: 30 30 34;
+  --cx-line: 35 35 39;
+  --cx-strong: 48 48 54;
+  --cx-text: 237 237 239;
+  --cx-muted: 161 161 170;
+  --cx-faint: 113 113 122;
+  --st-progress: 161 161 170;
+  --hl-watch: 58 58 65;
+  --ai-card: 12 18 34;
+  --ai-ink: #8fb3ff;
+  --cx-glow-fill: #151a1d;
+  --ai: 94 234 212;
+  --ai-teal-card: 13 20 19;
+  --cx-hero-glow: radial-gradient(55% 60% at 70% -5%, rgba(79, 150, 239, 0.2), rgba(9, 9, 11, 0) 70%),
+    radial-gradient(40% 45% at 15% 0%, rgba(148, 163, 184, 0.12), rgba(9, 9, 11, 0) 70%),
+    linear-gradient(180deg, rgba(17, 24, 39, 0.55), rgba(9, 9, 11, 0) 640px);
+}
+
+/* Option B — dark keeps the original palette (the :root defaults); light is cool paper. */
+.cx-b {
+  color-scheme: dark;
+}
+.cx-b[data-theme="light"] {
+  --cx-bg: 246 247 249;
+  --cx-panel: 255 255 255;
+  --cx-raised: 241 242 245;
+  --cx-hover: 234 236 240;
+  --cx-line: 226 228 233;
+  --cx-strong: 204 208 216;
+  --cx-text: 17 18 22;
+  --cx-muted: 78 83 94;
+  --cx-faint: 118 123 135;
+  --hl-watch: 213 216 223;
+  --ai: 13 128 116;
+  --ai-teal-card: 236 248 246;
+  --ai-card: 236 242 255;
+  --ai-ink: #2456c9;
+  /* inner fill of the cx-glow ring: the light panel, so the ring reads as a border */
+  --cx-glow-fill: #ffffff;
+  --cx-hero-glow: radial-gradient(55% 60% at 70% -5%, rgba(79, 150, 239, 0.16), rgba(246, 247, 249, 0) 70%),
+    radial-gradient(40% 45% at 15% 0%, rgba(148, 163, 184, 0.16), rgba(246, 247, 249, 0) 70%);
+  color-scheme: light;
+}
+
+body:has(.cx-root) {
+  background: #09090b;
+}
+body:has(.cx-b[data-theme="light"]) {
+  background: rgb(246 247 249);
+}
+.cx-root ::-webkit-scrollbar-thumb {
+  background: #303036;
+}
+.cx-root ::selection {
+  background: rgba(94, 234, 212, 0.25);
+}
+.cx-flash {
+  animation: cx-flash 1.6s ease-out;
+}
+@keyframes cx-flash {
+  0%, 30% {
+    box-shadow: 0 0 0 1px #5eead4, 0 0 0 5px rgba(94, 234, 212, 0.15);
+  }
+  100% {
+    box-shadow: 0 0 0 1px transparent, 0 0 0 5px transparent;
+  }
+}
+
+/* "Agent at work" ring — a light that travels around the border (DESIGN.md: cx-glow) */
+.cx-glow {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  box-shadow: 0 0 22px -4px rgba(94, 234, 212, 0.35);
+}
+.cx-glow::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 260%;
+  aspect-ratio: 1;
+  z-index: -2;
+  background: conic-gradient(from 0deg, transparent 0 55%, #3d7bf5 70%, #5eead4 82%, transparent 94%);
+  transform: translate(-50%, -50%) rotate(0turn);
+  animation: cx-orbit 3.6s linear infinite;
+}
+.cx-glow::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  border-radius: 7px;
+  background: var(--cx-glow-fill);
+}
+@keyframes cx-orbit {
+  to {
+    transform: translate(-50%, -50%) rotate(1turn);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cx-glow::before {
+    animation: none;
+    background: linear-gradient(90deg, #3d7bf5, #5eead4);
+  }
+}
+
+/* Option B KPI "View details": the opened card slides in from the left */
+.cx-slide-in {
+  animation: cx-slide-in 0.28s ease-out;
+}
+@keyframes cx-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cx-slide-in {
+    animation: none;
+  }
+}
+
+/* Option B — subtle landing sequence (plays once, on arrival).
+   Fill mode is "backwards", never "both": a retained transform would make these
+   sections trap the fixed-position drawers (Insights, territory brief) opened inside them. */
+@keyframes cx-land {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes cx-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes cx-rail {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes cx-stripe {
+  from {
+    opacity: 0;
+    transform: scaleY(0.25);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.cx-land-fade {
+  animation: cx-fade 0.5s ease-out backwards;
+}
+.cx-land-rail {
+  animation: cx-rail 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+.cx-land-hero {
+  animation: cx-land 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) 0.05s backwards;
+}
+/* each section rises in after the one before it */
+.cx-stagger > * {
+  animation: cx-land 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+.cx-stagger > *:nth-child(1) { animation-delay: 0.14s; }
+.cx-stagger > *:nth-child(2) { animation-delay: 0.22s; }
+.cx-stagger > *:nth-child(3) { animation-delay: 0.3s; }
+.cx-stagger > *:nth-child(4) { animation-delay: 0.38s; }
+.cx-stagger > *:nth-child(5) { animation-delay: 0.46s; }
+.cx-stagger > *:nth-child(6) { animation-delay: 0.54s; }
+.cx-stagger > *:nth-child(7) { animation-delay: 0.62s; }
+.cx-stagger > *:nth-child(n + 8) { animation-delay: 0.7s; }
+/* KPI stripes fill in left to right */
+.cx-stripe {
+  transform-origin: bottom;
+  animation: cx-stripe 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cx-land-fade,
+  .cx-land-rail,
+  .cx-land-hero,
+  .cx-stagger > *,
+  .cx-stripe {
+    animation: none;
+  }
+}
+
+/* Configuration threshold slider: the zone track is drawn beneath; the input supplies the thumb */
+.cx-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+.cx-range::-webkit-slider-runnable-track {
+  height: 20px;
+  background: transparent;
+}
+.cx-range::-moz-range-track {
+  height: 20px;
+  background: transparent;
+}
+.cx-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-radius: 9999px;
+  background: rgb(var(--cx-text));
+  border: 3px solid rgb(var(--cx-panel));
+  box-shadow: 0 0 0 1px rgb(var(--cx-strong)), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.cx-range::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: rgb(var(--cx-text));
+  border: 3px solid rgb(var(--cx-panel));
+  box-shadow: 0 0 0 1px rgb(var(--cx-strong)), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.cx-range:focus-visible {
+  outline: none;
+}
+.cx-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 1px rgb(var(--cx-strong)), 0 0 0 4px rgba(47, 111, 237, 0.45);
+}
+.cx-range:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 1px rgb(var(--cx-strong)), 0 0 0 4px rgba(47, 111, 237, 0.45);
+}

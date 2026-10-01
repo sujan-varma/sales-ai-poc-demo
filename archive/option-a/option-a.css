@@ -1,0 +1,46 @@
+/* Archived from src/app/globals.css — Option A theme tokens (historical reference only, not loaded). */
+/* Option A — "field ledger": warm graphite (dark) and paper (light). */
+.cx-a {
+  --cx-bg: 14 14 12;
+  --cx-panel: 21 21 18;
+  --cx-raised: 29 29 25;
+  --cx-hover: 36 36 31;
+  --cx-line: 42 41 36;
+  --cx-strong: 60 59 52;
+  --cx-text: 242 240 233;
+  --cx-muted: 178 174 162;
+  --cx-faint: 124 121 110;
+  --st-progress: 242 240 233;
+  --hl-watch: 58 57 51;
+  --ai-card: 13 19 36;
+  --cx-glow-fill: #16181a;
+  color-scheme: dark;
+  /* Option A type: Geist + Geist Mono (the Plex utilities resolve to Geist inside .cx-a) */
+  --font-plex-sans: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-plex-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-plex-sans);
+}
+.cx-a[data-theme="light"] {
+  --cx-bg: 244 242 236;
+  --cx-panel: 251 250 247;
+  --cx-raised: 238 235 227;
+  --cx-hover: 232 228 219;
+  --cx-line: 223 219 208;
+  --cx-strong: 200 195 182;
+  --cx-text: 27 26 23;
+  --cx-muted: 84 81 73;
+  --cx-faint: 124 120 109;
+  --st-progress: 27 26 23;
+  --hl-watch: 205 200 188;
+  --ai-card: 236 242 255;
+  --ai-ink: #2456c9;
+  --cx-glow-fill: #fbfaf7;
+  color-scheme: light;
+}
+
+body:has(.cx-a) {
+  background: rgb(14 14 12);
+}
+body:has(.cx-a[data-theme="light"]) {
+  background: rgb(244 242 236);
+}

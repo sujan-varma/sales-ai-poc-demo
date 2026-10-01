@@ -1,0 +1,26 @@
+# dependencies / build output
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# secrets and runtime state
+.env
+.env.local
+.env.*.local
+backend/.env
+backend/data/tokens.json
+backend/data/*.tmp
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# local design-tool screenshots
+.impeccable/review/
