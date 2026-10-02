@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query
 
 from app.routers.sales import _workbook
 from app.schemas import ApiResponse
-from app.services import web_data, web_plan
+from app.services import web_data, web_huddle, web_plan
 
 router = APIRouter(prefix="/api/web", tags=["web app"])
 
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/web", tags=["web app"])
 )
 def bootstrap(asm: Optional[str] = Query(None, description="ASM persona for the ASM screens (default Raman)")):
     # the workbook part is cached per load; assignments and app updates (tracker.json) are applied per request
-    data = web_plan.overlay(web_data.build(_workbook(), asm or "Raman"))
+    data = web_huddle.overlay(web_plan.overlay(web_data.build(_workbook(), asm or "Raman")))
     return ApiResponse(data=data, total=len(data["thermometer"]["CPS"]))
 
 

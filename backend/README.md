@@ -132,6 +132,18 @@ Built by `app/services/web_plan.py` for the ASM, from the workbook:
 | Pitch | One pitch per outlet the plan reaches; KPIs and talking points from the outlet's own rows (tenure, credit, SKU gap in `11. Sep projections`, loyalty pitch statement, short supply). Visited = last SO visit on or after 1 Sep |
 | Tracker | The ASM's signal groups (Needs an owner) and the officers' retailer actions (Team), plus — per request, from `tracker.json` — assignments, the officers' updates and completions, and verifications |
 
+## Huddle data (`huddle` in `/api/web/bootstrap`)
+
+Built by `app/services/web_huddle.py` from the `Huddle` sheet for the ASM's team. The sheet has themes (owner, urgency, session, verbatim, action count) but no dates, attendance or decisions, so:
+
+- Sales-owned themes are the team's daily **Morning** and **Evening** huddles; other departments' themes are **ad-hoc** cross-functional calls. They are laid out over the last seven working days to 20 Sep, in sheet order.
+- One action per theme (owner = its designation, the sheet's action count, due by urgency). **Assign action** calls `/api/tracker/assign` with `source_id = hud-<theme>`, so it becomes a Tracker ticket and its status shows on the huddle pages.
+- High urgency = systemic blocker; medium urgency owned by another team = incomplete discussion.
+- Each theme is checked against the region's workbook signals (credit, targets, short supply, market share, distributor trend, loyalty); a match shows as evidence and raises confidence.
+- **Capability Building** per meeting uses SalesPulze's criteria and weights (Action Item Quality and Decisions Made 15%, BDE Performance Effectiveness 25%, Beat Plan Adherence 25%, Reach Expansion Review 25%, Throughput & Revenue 5%, Throughput & Revenue Recovery 5%). A criterion scores 0 / 60 / 80 / 100 when none, one, two or three-plus of the meeting's themes cover it; the themes are the evidence. Hygiene and actual durations show as not recorded.
+- **Field Operations Health** (`ENTITIES`) scores every region (level 2), territory (3) and sales officer (4) on the same criteria from the workbook: beat plan = retailers visited in the last 30 days, reach = retailers billed in September, throughput = September MTD sales vs phased target, recovery = 1 − overdue / outstanding, BDE = influencer activation vs target, action quality = huddle themes with an owner and 3+ actions (only where huddles exist). Bands: Healthy 80–100, Moderate 60–80, Attention 40–60, Critical 0–40.
+- Themes are tagged with product categories (`2. Products`), business segments and the owning function, for the repository filters, Product Discussion Coverage and Action Execution Overview.
+
 ## Mobile app data (`/api/app/bootstrap`)
 
 Every screen's data for one sales officer comes from the Excel workbook. `?so=` takes an ID or a name and defaults to `DEFAULT_SALES_OFFICER` (`SO018`). `?today=` defaults to `APP_TODAY` (`2026-09-21`, the day after the workbook's actuals end).
