@@ -1,10 +1,11 @@
 "use client";
 
-// Loads the Excel-backed data from the backend before any dashboard module is imported, then lazy-loads the
-// page. The data modules (src/data) read the payload while they evaluate, so nothing renders on empty data.
+// Loads the Excel-backed data from the backend, one section at a time with a checklist, before any dashboard module
+// is imported, then lazy-loads the page. The data modules (src/data) read the payload while they evaluate, so nothing renders on empty data.
 
 import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
-import { apiUrl, loadCortexData } from "@/data/source";
+import { Check } from "lucide-react";
+import { apiUrl, loadCortexData, type LoadProgress } from "@/data/source";
 
 export type CortexView =
   | "asm"
@@ -66,16 +67,56 @@ function Loading({ label }: { label: string }) {
   );
 }
 
+const fmt = (n: number) => n.toLocaleString("en-IN");
+
+/** Each section of the workbook data, ticked off as it arrives from the backend. */
+function Loader({ progress }: { progress: LoadProgress | null }) {
+  const steps = progress?.steps ?? [];
+  const done = steps.filter((x) => x.state === "done").length;
+  return (
+    <Centered>
+      <div className="w-full max-w-md rounded-xl border border-cx-line bg-cx-panel p-5 text-left" role="status" aria-live="polite">
+        <p className="font-data text-[10.5px] uppercase tracking-[0.08em] text-cx-faint">Sales AI</p>
+        <p className="mt-1 text-[15px] font-medium text-cx-text">Loading sales data</p>
+        <p className="mt-1 text-[12px] text-cx-muted">
+          {!steps.length ? "Processing the workbook on the server…" : `Processed from the workbook · ${done} of ${steps.length} sections loaded`}
+        </p>
+        <div className="mt-3 h-1 overflow-hidden rounded-full bg-cx-hover">
+          <div className="h-full rounded-full bg-cx-text transition-[width] duration-300" style={{ width: `${steps.length ? (done / steps.length) * 100 : 6}%` }} />
+        </div>
+        <ul className="mt-3 space-y-1">
+          {steps.map((x) => (
+            <li key={x.key} className="flex items-center gap-2.5 py-1 text-[12.5px]">
+              {x.state === "done" ? (
+                <Check className="h-3.5 w-3.5 shrink-0 text-[#3fb950]" aria-hidden />
+              ) : x.state === "loading" ? (
+                <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-cx-faint/30 border-t-cx-text" aria-hidden />
+              ) : (
+                <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center" aria-hidden>
+                  <span className="h-1.5 w-1.5 rounded-full bg-cx-faint/50" />
+                </span>
+              )}
+              <span className={x.state === "waiting" ? "flex-1 text-cx-faint" : "flex-1 text-cx-text"}>{x.label}</span>
+              <span className="font-data text-[11px] text-cx-muted">{fmt(x.records)} records</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Centered>
+  );
+}
+
 export function DataGate({ view }: { view: CortexView }) {
   const [state, setState] = useState<"loading" | "ready" | "error">(globalThis.__CORTEX_DATA__ ? "ready" : "loading");
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
+  const [progress, setProgress] = useState<LoadProgress | null>(null);
 
   useEffect(() => {
     if (state === "ready") return;
     let alive = true;
     setState("loading");
-    loadCortexData()
+    loadCortexData((p) => alive && setProgress(p))
       .then(() => alive && setState("ready"))
       .catch((e: unknown) => {
         if (!alive) return;
@@ -96,7 +137,7 @@ export function DataGate({ view }: { view: CortexView }) {
       <Centered>
         <p className="text-[15px] font-medium text-cx-text">Couldn&apos;t load the sales data</p>
         <p className="max-w-md text-[13px] text-cx-muted">
-          {error} · {apiUrl()}/api/web/bootstrap
+          {error} · {apiUrl()}/api/web/sections
         </p>
         <p className="max-w-md text-[12px] text-cx-faint">Start the backend (backend/README.md) or set API_URL on the frontend server, then try again.</p>
         <button className="mt-2 rounded-md border border-cx-line px-4 py-2 text-[13px] text-cx-text hover:bg-cx-hover" onClick={() => setAttempt((n) => n + 1)}>
@@ -105,7 +146,7 @@ export function DataGate({ view }: { view: CortexView }) {
       </Centered>
     );
   }
-  if (!Page) return <Loading label="Loading sales data from the workbook…" />;
+  if (!Page) return <Loader progress={progress} />;
   return (
     <Suspense fallback={<Loading label="Preparing the dashboard…" />}>
       <Page />
