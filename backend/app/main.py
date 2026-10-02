@@ -87,10 +87,20 @@ app.include_router(tracker.router)
 app.include_router(app_data.router)
 app.include_router(web_data.router)
 
+class _AppFiles(StaticFiles):
+    """The mobile app's files, revalidated on every load. Without a Cache-Control header browsers cache by the file's
+    age, so after a redeploy a phone (an iPhone Home Screen app especially) kept showing the previous build."""
+
+    async def get_response(self, path, scope):
+        r = await super().get_response(path, scope)
+        r.headers["Cache-Control"] = "no-cache"
+        return r
+
+
 # the mobile app's web build, served from the same origin as the API (open http://<host>:8000/app on a phone)
 _static = settings.resolve(settings.app_static_dir)
 if _static.is_dir():
-    app.mount("/app", StaticFiles(directory=_static, html=True), name="app")
+    app.mount("/app", _AppFiles(directory=_static, html=True), name="app")
 
 
 @app.get("/", include_in_schema=False)

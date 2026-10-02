@@ -1,4 +1,4 @@
-// Runtime data from the backend (GET /api/web/bootstrap), built from the Excel workbook.
+// Runtime data from the backend (GET /api/web/sections, then each section), built from the Excel workbook.
 //
 // DataGate fetches the payload and stores it on globalThis before any dashboard module is imported, so the
 // data modules in this folder read real values while they evaluate — including the values they derive at load.
@@ -43,29 +43,80 @@ export function dataGaps() {
   return globalThis.__CORTEX_DATA__?.data_gaps ?? [];
 }
 
-let pending: Promise<CortexData> | null = null;
-
-/** Fetch the payload once per page load; later calls reuse it. */
-export function loadCortexData(): Promise<CortexData> {
-  if (globalThis.__CORTEX_DATA__) return Promise.resolve(globalThis.__CORTEX_DATA__);
-  if (!pending) {
-    pending = resolveApiBase()
-      .then((base) => fetch(`${base}/api/web/bootstrap`, { cache: "no-store" }))
-      .then(async (r) => {
-        let j: { success?: boolean; data?: CortexData; error?: string };
-        try {
-          j = await r.json();
-        } catch {
-          throw new Error(`HTTP ${r.status}`);
-        }
-        if (!j.success || !j.data) throw new Error(j.error || `HTTP ${r.status}`);
-        globalThis.__CORTEX_DATA__ = j.data;
-        return j.data;
-      })
-      .catch((e) => {
-        pending = null;
-        throw e;
-      });
+async function getJson<T>(path: string): Promise<T> {
+  const base = await resolveApiBase();
+  const r = await fetch(`${base}${path}`, { cache: "no-store" });
+  let j: { success?: boolean; data?: T; error?: string };
+  try {
+    j = await r.json();
+  } catch {
+    throw new Error(`HTTP ${r.status}`);
   }
-  return pending;
+  if (!j.success) throw new Error(j.error || `HTTP ${r.status}`);
+  return j.data as T;
+}
+
+export interface LoadStep {
+  key: string;
+  label: string;
+  records: number;
+  state: "waiting" | "loading" | "done";
+  ms?: number;
+}
+export type LoadProgress = { builtMs?: number; steps: LoadStep[] };
+
+/** Each section's step lasts at least this long, so the loader reads as the backend processing each data set
+ *  (the requests themselves take a few ms once the workbook is processed). */
+const MIN_STEP_MS = 280;
+const wait = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+
+let pending: Promise<CortexData> | null = null;
+// everyone waiting on the load hears its progress, including a caller that joins a load already under way
+// (React runs a page's effect twice in development; the second run must still see the steps)
+const listeners = new Set<(p: LoadProgress) => void>();
+let latest: LoadProgress | null = null;
+const emit = (p: LoadProgress) => {
+  latest = { ...p, steps: p.steps.map((x) => ({ ...x })) };
+  listeners.forEach((f) => f(latest!));
+};
+
+/** The workbook-backed data, loaded one section at a time: the backend first builds it, then each section is fetched
+ *  on its own and ticked off by the loader. Once per page load; later calls reuse it. */
+export function loadCortexData(onProgress?: (p: LoadProgress) => void): Promise<CortexData> {
+  if (globalThis.__CORTEX_DATA__) return Promise.resolve(globalThis.__CORTEX_DATA__);
+  if (onProgress) {
+    listeners.add(onProgress);
+    if (latest) onProgress(latest);
+  }
+  if (!pending) {
+    latest = null;
+    pending = (async () => {
+      const p: LoadProgress = { steps: [] };
+      emit(p);
+      const [info] = await Promise.all([
+        getJson<{ built_ms: number; sections: { key: string; label: string; records: number }[] }>("/api/web/sections"),
+        wait(MIN_STEP_MS * 2),
+      ]);
+      Object.assign(p, { builtMs: info.built_ms, steps: info.sections.map((x) => ({ ...x, state: "waiting" })) });
+      emit(p);
+      const data = {} as CortexData;
+      for (const step of p.steps) {
+        step.state = "loading";
+        emit(p);
+        const t = performance.now();
+        const [value] = await Promise.all([getJson(`/api/web/sections/${encodeURIComponent(step.key)}`), wait(MIN_STEP_MS)]);
+        (data as Record<string, unknown>)[step.key] = value;
+        Object.assign(step, { state: "done", ms: Math.round(performance.now() - t) });
+        emit(p);
+      }
+      await wait(MIN_STEP_MS); // the finished checklist stays up a moment
+      globalThis.__CORTEX_DATA__ = data;
+      return data;
+    })().catch((e) => {
+      pending = null;
+      throw e;
+    });
+  }
+  const done = () => onProgress && listeners.delete(onProgress);
+  return pending.finally(done);
 }
