@@ -104,6 +104,12 @@ class AssignRequest(BaseModel):
     note: Optional[str] = Field(default=None, max_length=500)
 
 
+class VisitEvent(BaseModel):
+    so: str = Field(min_length=1, description="The sales officer", examples=["SO018"])
+    type: Literal["checkin", "checkout"]
+    retailer_id: str = Field(min_length=1, description="The visit's retailer", examples=["RetTile1264"])
+
+
 class ActionEvent(BaseModel):
     so: str = Field(min_length=1, description="The sales officer sending the update", examples=["SO018"])
     type: Literal["started", "comment", "complete"]

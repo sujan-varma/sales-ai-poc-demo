@@ -6,7 +6,7 @@
 // Verifying a ticket closes the loop upward (use-case step 11): the plan row's Delivered and
 // the originating insight update, with nothing re-entered.
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, Flag, MessageSquare, Paperclip, Plus, Undo2 } from "lucide-react";
 import { AgentRun } from "@/data/cortexHome";
 import { PRIORITY_COLOR, Priority, TERRITORIES, SEP_INITIATIVES } from "@/data/map";
@@ -20,12 +20,15 @@ import {
   Ticket,
   TicketClass,
   deliveredAfter,
+  fetchAsmTickets,
   isMine,
+  isRemote,
   nowLabel,
   octTickets,
   TRACKER_LABELS,
   readLoop,
   ticketTrace,
+  toHeadTicket,
   writeLoop,
 } from "@/data/tracker";
 import { pitchesFor, readSession } from "@/data/pitch";
@@ -94,8 +97,14 @@ function HeadFrame() {
 
 const VIEWS = ["Board · all tickets", "Breaching SLA", "Awaiting verification"];
 
+/** how often the open board re-reads the backend's tickets */
+const LIVE_MS = 15000;
+/** a ticket the ASM changed here keeps that change this long, so a poll already under way doesn't undo it */
+const KEEP_LOCAL_MS = 10000;
+
 function Board({ who }: { who: Who }) {
   const go = useCortexNav();
+  const { toast } = useHome();
   const head = who === "head";
   const [tickets, setTickets] = useState<Ticket[]>(() => (head ? HEAD_TICKETS : ASM_TICKETS));
   const [scope, setScope] = useState<"mine" | "team">("mine");
@@ -134,7 +143,66 @@ function Board({ who }: { who: Who }) {
       (view === VIEWS[1] ? !!t.sla.breach : view === VIEWS[2] ? t.column === "verify" : true)
   );
   const ticket = tickets.find((t) => t.id === open) ?? null;
-  const update = (t: Ticket) => setTickets((ts) => ts.map((x) => (x.id === t.id ? t : x)));
+  const edited = useRef<Record<string, number>>({});
+  const update = (t: Ticket) => {
+    edited.current[t.id] = Date.now();
+    setTickets((ts) => ts.map((x) => (x.id === t.id ? t : x)));
+  };
+
+  // officers start and complete their actions in the mobile app: re-read the backend's tickets while the board is open,
+  // so a "done" lands in Awaiting Verification without a reload
+  const ticketsRef = useRef(tickets);
+  ticketsRef.current = tickets;
+  const served = useRef(new Set(ASM_TICKETS.map((t) => t.id)));
+  useEffect(() => {
+    let stop = false;
+    const pull = async () => {
+      if (document.visibilityState !== "visible") return;
+      let all: Ticket[];
+      try {
+        all = await fetchAsmTickets();
+      } catch {
+        return; // offline for a moment: keep what is on screen
+      }
+      if (stop) return;
+      const now = Date.now();
+      const byId = new Map(all.map((s) => [s.id, s]));
+      const ts = ticketsRef.current;
+      const next: Ticket[] = [];
+      const done: Ticket[] = [];
+      for (const t of ts) {
+        const s = byId.get(t.id);
+        // gone from the backend (a reset, or an assignment that replaced it): drop it; tickets made on this page stay
+        if (!s) {
+          if (!served.current.has(t.id)) next.push(t);
+          continue;
+        }
+        // what the ASM just did here wins over a poll that was already under way
+        if (!isRemote(s) || now - (edited.current[t.id] ?? 0) < KEEP_LOCAL_MS) {
+          next.push(t);
+          continue;
+        }
+        if (s.column === "verify" && t.column !== "verify") done.push(s);
+        next.push(head ? toHeadTicket(s) : s);
+      }
+      const have = new Set(ts.map((t) => t.id));
+      const fresh = all.filter((s) => !have.has(s.id));
+      done.push(...fresh.filter((s) => s.column === "verify"));
+      const added = fresh.map((s) => (head ? toHeadTicket(s) : s));
+      all.forEach((s) => served.current.add(s.id));
+      setTickets([...added, ...next]);
+      if (!head && done.length)
+        toast(done.length > 1 ? `${done.length} actions marked done in the app · awaiting your verification` : `${done[0].delegatedTo ?? done[0].assignee ?? "The officer"} marked ${done[0].id} done in the app · awaiting your verification`);
+    };
+    const t = setInterval(pull, LIVE_MS);
+    const onVis = () => document.visibilityState === "visible" && pull();
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      stop = true;
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [head, toast]);
 
   return (
     <div className="pb-24">
@@ -323,7 +391,7 @@ function TicketDrawer({ t, who, onClose, onChange }: { t: Ticket; who: Who; onCl
   const nt = useAssignments();
   const ASM = TRACKER_LABELS.asm;
   /** assignments and the officers' field actions live in the backend; the officer is notified there */
-  const remote = t.stored || !!(t.soId && t.retailerId);
+  const remote = isRemote(t);
   const head = who === "head";
   const [watching, setWatching] = useState(false);
   const [run, setRun] = useState<{ run: AgentRun; key: number } | null>(null);
@@ -331,7 +399,9 @@ function TicketDrawer({ t, who, onClose, onChange }: { t: Ticket; who: Who; onCl
   const [result, setResult] = useState<{ before: number; after: number; initiative?: number; insight?: string } | null>(null);
   const [comment, setComment] = useState("");
   const [comments, setComments] = useState(t.comments);
-  const col = COLUMNS.find((c) => c.id === t.column)!;
+  // the board re-reads the ticket while this is open (an officer's update in the app)
+  useEffect(() => setComments(t.comments), [t.comments]);
+  const col =COLUMNS.find((c) => c.id === t.column)!;
   const pitchId = useMemo(() => (t.links?.pitchOutlet ? pitchesFor(readSession()).find((p) => p.outlet === t.links!.pitchOutlet)?.id : undefined), [t.links]);
   const init = t.links?.initiative ? SEP_INITIATIVES.find((i) => i.id === t.links!.initiative) : undefined;
 
@@ -621,7 +691,7 @@ function TicketDrawer({ t, who, onClose, onChange }: { t: Ticket; who: Who; onCl
               e.preventDefault();
               if (!comment.trim()) return;
               const text = comment.trim();
-              setComments((c) => [...c, { who: ASM, when: "Just now", text }]);
+              onChange({ ...t, comments: [...comments, { who: ASM, when: "Just now", text }] });
               setComment("");
               if (remote) nt.comment(t.id, text, t).catch((e: Error) => toast(`Not saved: ${e.message}`));
             }}

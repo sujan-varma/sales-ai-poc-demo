@@ -336,6 +336,15 @@ logA=function(a,t,txt){_logA(a,t,txt);
   if(!a.assigned)Object.assign(body,{retailer_id:a.retailer_id,signal:a.signal,title:a.title});
   apiJ('/api/tracker/actions/'+encodeURIComponent(a.id)+'/events',{method:'POST',body:JSON.stringify(body)}).catch(e=>toast('Not saved: '+e.message))};
 
+// check-in / check-out are saved too: a reload (or a push tap that reopens the app) keeps the visit checked in, and
+// the actions it unlocks stay unlocked
+const saveVisit=(v,type)=>{if(!v||!v.retailer_id)return;
+  apiJ('/api/app/visits/'+encodeURIComponent(v.id)+'/events',{method:'POST',body:JSON.stringify({so:SO,type,retailer_id:v.retailer_id})}).catch(e=>toast('Not saved: '+e.message))};
+const _checkIn=checkIn;
+checkIn=function(i){const v=VISITS[i],was=v&&v.state;_checkIn(i);if(v&&was!=='checkedin'&&v.state==='checkedin')saveVisit(v,'checkin')};
+const _checkOut=checkOut;
+checkOut=function(){const v=visitById(curVisitId),was=v&&v.state;_checkOut();if(v&&was!=='completed'&&v.state==='completed')saveVisit(v,'checkout')};
+
 // open an action from a notification tap (service worker) or a #a=<id> link. Not loaded yet: the new-notifications
 // poll brings it; failing that (its notification was polled before), every assigned action is fetched again.
 async function openFromPush(aid){if(!aid)return;

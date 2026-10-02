@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.config import get_settings
 from app.routers.sales import _workbook
-from app.schemas import ApiResponse
+from app.schemas import ApiResponse, VisitEvent
 from app.services import field_app, tracker
 
 router = APIRouter(prefix="/api/app", tags=["mobile app"])
@@ -51,6 +51,19 @@ def inbox(
     except tracker.TrackerError as e:
         raise HTTPException(e.status, str(e))
     return ApiResponse(data=data, total=len(data["notifications"]))
+
+
+@router.post(
+    "/visits/{visit_id}/events",
+    response_model=ApiResponse[dict[str, Any]],
+    summary="Check in to / out of a visit from the app, kept so a reload doesn't lose it",
+)
+def visit_event(visit_id: str, ev: VisitEvent):
+    try:
+        data = tracker.visit_event(_workbook(), visit_id, ev.model_dump())
+    except tracker.TrackerError as e:
+        raise HTTPException(e.status, str(e))
+    return ApiResponse(data=data, total=1)
 
 
 @router.get("/data-gaps", response_model=ApiResponse[list[dict[str, str]]], summary="What the workbook cannot provide")

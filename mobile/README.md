@@ -23,7 +23,7 @@
 2. It then starts the UI with that data.
 3. If the request fails, the page shows the error with a **Try again** button.
 
-Starting, updating and completing an action is saved to the backend (`POST /api/tracker/actions/{id}/events`), and so is notification read state. Check-ins, orders and follow-up actions created in the app are still kept in memory only, so a reload starts them again from the backend data.
+Starting, updating and completing an action is saved to the backend (`POST /api/tracker/actions/{id}/events`), and so are notification read state and visit check-in / check-out (`POST /api/app/visits/{id}/events`), so a reload or a push tap that reopens the app keeps the visit checked in. Orders and follow-up actions created in the app are still kept in memory only, so a reload starts them again from the backend data.
 
 ## Notifications
 

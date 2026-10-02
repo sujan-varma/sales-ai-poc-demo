@@ -19,7 +19,8 @@ SECTIONS = {
 
 def _payload(asm: Optional[str]) -> dict[str, Any]:
     # the workbook part is cached per load; assignments and app updates (tracker.json) are applied per request
-    return web_huddle.overlay(web_plan.overlay(web_data.build(_workbook(), asm or "Raman")))
+    wb = _workbook()
+    return web_huddle.overlay(web_plan.overlay(web_data.build(wb, asm or "Raman"), wb))
 
 
 def _records(v: Any, depth: int = 0) -> int:

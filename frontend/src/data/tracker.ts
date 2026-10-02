@@ -2,12 +2,12 @@
 // Closed / Verified. The ASM sees My Actions and Team; the Sales Head sees the roll-up at ASM level only, never the
 // officer beneath. Tickets come from the backend (GET /api/web/bootstrap → `tracker`): the ASM's signal groups from
 // the workbook, the officers' own field actions, and — applied per request — what was assigned in Sales AI, started
-// or completed in the officers' app, and verified here.
+// or completed in the officers' app, and verified here. The board re-reads them while it is open (fetchAsmTickets).
 
 import { ActionTrace } from "./actionTraces";
 import { AgentId } from "./cortexHome";
 import { Priority, SEP_INITIATIVES } from "./map";
-import { D } from "./source";
+import { D, apiUrl } from "./source";
 
 const T = <V,>(key: string) => D<V>("tracker", key);
 
@@ -117,23 +117,33 @@ const SE_RE = SE_NAMES.length ? new RegExp(`\\b(${SE_NAMES.map((n) => n.replace(
 const foldSe = (s: string) =>
   SE_RE ? s.replace(SE_RE, (_m, _n, at: number) => (at === 0 || /[.!?]\s$/.test(s.slice(Math.max(0, at - 2), at)) ? "The Sales Executive" : "the Sales Executive")) : s;
 
-export const HEAD_TICKETS: Ticket[] = [
-  ...ASM_TICKETS.map((t) => ({
-    ...t,
-    title: foldSe(t.title),
-    description: foldSe(t.description),
-    sla: t.sla.label === "Waiting on you" ? { ...t.sla, label: `Waiting on ${t.asm}` } : t.sla,
-    provenance: { ...t.provenance, screen: foldSe(t.provenance.screen) },
-    closure: t.closure && { ...t.closure, outcome: foldSe(t.closure.outcome) },
-    assignee: t.assignee === null ? null : t.asm,
-    delegatedTo: undefined,
-    watchers: t.watchers.filter((w) => !w.role.startsWith("Sales Executive")),
-    activity: t.activity.map((a) => ({ ...a, who: SE_NAMES.includes(a.who) ? `${t.asm}'s team` : a.who, what: foldSe(a.what) })),
-    comments: [],
-    sfaDone: undefined,
-  })),
-  ...OTHER_ASM_TICKETS,
-];
+export const toHeadTicket = (t: Ticket): Ticket => ({
+  ...t,
+  title: foldSe(t.title),
+  description: foldSe(t.description),
+  sla: t.sla.label === "Waiting on you" ? { ...t.sla, label: `Waiting on ${t.asm}` } : t.sla,
+  provenance: { ...t.provenance, screen: foldSe(t.provenance.screen) },
+  closure: t.closure && { ...t.closure, outcome: foldSe(t.closure.outcome) },
+  assignee: t.assignee === null ? null : t.asm,
+  delegatedTo: undefined,
+  watchers: t.watchers.filter((w) => !w.role.startsWith("Sales Executive")),
+  activity: t.activity.map((a) => ({ ...a, who: SE_NAMES.includes(a.who) ? `${t.asm}'s team` : a.who, what: foldSe(a.what) })),
+  comments: [],
+  sfaDone: undefined,
+});
+
+export const HEAD_TICKETS: Ticket[] = [...ASM_TICKETS.map(toHeadTicket), ...OTHER_ASM_TICKETS];
+
+/** Kept in the backend (an assignment, or an officer's field action), so the officer's app can change it. */
+export const isRemote = (t: Ticket) => !!t.stored || !!(t.soId && t.retailerId);
+
+/** The ASM's tickets as the backend has them now, with what the officers did in the app since the page loaded. */
+export async function fetchAsmTickets(): Promise<Ticket[]> {
+  const r = await fetch(`${apiUrl()}/api/web/sections/tracker`, { cache: "no-store" });
+  const j = (await r.json()) as { success?: boolean; data?: { ASM_TICKETS: Ticket[] }; error?: string };
+  if (!j.success || !j.data) throw new Error(j.error || `HTTP ${r.status}`);
+  return j.data.ASM_TICKETS;
+}
 
 export const HEAD_ASMS = T<string[]>("HEAD_ASMS");
 

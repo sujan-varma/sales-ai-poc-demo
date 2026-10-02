@@ -49,6 +49,7 @@ KIND_CLASS = {"collection": "Collection", "credit": "Collection", "gap": "Range"
 KIND_LABEL = {"collection": "Collection follow-up", "credit": "Credit limit review", "gap": "Sep target gap", "short": "Short-supply follow-up",
               "coverage": "Retailer coverage", "loyalty": "Loyalty slab push"}
 APP_KIND = {"collection": "collection", "credit": "credit_limit", "gap": "target_gap", "short": "short_supply", "loyalty": "loyalty"}
+WEB_KIND = {v: k for k, v in APP_KIND.items()}
 REACH_TARGET = 0.7
 
 PLAN_GAPS = [
@@ -604,7 +605,7 @@ def _when(ms: int) -> str:
     return f"{d.day} {d.strftime('%b')}, {d.strftime('%H:%M')}"
 
 
-def overlay(data: dict[str, Any]) -> dict[str, Any]:
+def overlay(data: dict[str, Any], wb: Optional[Workbook] = None) -> dict[str, Any]:
     """Return a copy of the cached payload with tracker.json applied: assignments become tickets, officers' starts /
     completions / updates move their tickets, verifications close them, and plan rows show their tickets."""
     tr = data["tracker"]
@@ -688,13 +689,16 @@ def overlay(data: dict[str, Any]) -> dict[str, Any]:
                 x["comments"] = x["comments"] + [{"who": c["who"], "at": c["when"], "text": c["text"], "ticket": f"{a['id']} · owner {a['assignee']['name']}"} for c in comments(a["acts"])]
 
     # the officers' own field actions: completions in the app wait for verification here
+    shown: set[str] = set()
     for t in tickets:
         if not t.get("retailerId"):
             continue
-        ov = next((v for k, v in state["overrides"].items() if k.startswith(f"{t['soId']}|") and v.get("retailer_id") == t["retailerId"]
-                   and v.get("signal") in (None, APP_KIND.get(t.get("kind") or ""))), None)
-        if not ov:
+        key = next((k for k, v in state["overrides"].items() if k.startswith(f"{t['soId']}|") and v.get("retailer_id") == t["retailerId"]
+                    and v.get("signal") in (None, APP_KIND.get(t.get("kind") or ""))), None)
+        if not key:
             continue
+        ov = state["overrides"][key]
+        shown.add(key)
         t["column"] = column(ov["st"], ov.get("verified", False))
         t["activity"] = t["activity"] + act_rows(ov["acts"])
         t["comments"] = comments(ov["acts"])
@@ -703,6 +707,37 @@ def overlay(data: dict[str, Any]) -> dict[str, Any]:
         if t["column"] == "closed":
             t["sla"] = {"label": "Met", "met": True}
             t["closure"] = {"outcome": (ov.get("outcome") or {}).get("label") or "Verified", "verifier": A, "ack": "Verified"}
+
+    # the board lists only the largest field actions; one the officer worked on in the app gets its own ticket, so a
+    # "done" on any of this ASM's retailers still reaches Awaiting Verification
+    retailers = tracker_store._people(wb)["retailers"] if wb is not None else {}
+    for key, ov in sorted(state["overrides"].items(), key=lambda kv: kv[1]["acts"][0]["ts"] if kv[1]["acts"] else 0):
+        r = retailers.get(str(ov.get("retailer_id")))
+        if key in shown or r is None or r["ASM Name"] != A or not any(e["role"] == "so" for e in ov["acts"]):
+            continue
+        so_id, app_id = key.split("|", 1)
+        kind = WEB_KIND.get(ov.get("signal") or "")
+        # an assignment for the same retailer and signal is this action's ticket already
+        if any(a.get("retailer_id") == ov["retailer_id"] and a.get("kind") == kind for a in stored):
+            continue
+        col = column(ov["st"], ov.get("verified", False))
+        so_name, terr = r["Sales officer name"], r["Territory"]
+        started = ov["acts"][0]["ts"]
+        tickets.insert(0, {
+            "id": app_id, "title": f"{ov.get('title') or 'Field action'} · {ov['outlet']}",
+            "description": f"{ov.get('title') or 'Field action'} at {ov['outlet']} ({terr}). {so_name} worked on it in the SFA app.",
+            "source": "thermometer", "cls": KIND_CLASS.get(kind or "", "Channel"), "priority": "Medium", "column": col, "isNew": col == "verify",
+            "territory": terr, "asm": A, "region": region, "assignee": so_name, "due": "—",
+            "sla": {"label": "Met", "met": True} if col == "closed" else {"label": "Waiting on you"} if col == "verify" else {"label": "In the officer's app"},
+            "watchers": [{"name": so_name, "role": f"Sales Executive · {terr}", "relation": "Assignee"}, {"name": A, "role": f"ASM · {region}", "relation": "Watching"}],
+            "provenance": {"screen": f"SFA app · {ov['outlet']}", "evidence": f"{ov['retailer_id']} · {ov.get('signal') or 'field'} signal", "raised": f"{so_name}, {_when(started)}"},
+            "entities": f"{ov['retailer_id']} {ov['outlet']} · {terr}",
+            "age": f"{max(0, (dt.date.today() - dt.datetime.fromtimestamp(started / 1000).date()).days)} days",
+            "relationships": {}, "activity": act_rows(ov["acts"]), "comments": comments(ov["acts"]), "attachments": 0, "views": 1, "links": {},
+            **({"sfaDone": s} if col == "verify" and (s := sfa_done(ov["acts"], ov.get("outcome"))) else {}),
+            **({"closure": {"outcome": (ov.get("outcome") or {}).get("label") or "Verified", "verifier": A, "ack": "Verified"}} if col == "closed" else {}),
+            "retailerId": ov["retailer_id"], "soId": so_id, **({"kind": kind} if kind else {}),
+        })
 
     # visit feedback the officers typed in the app, for "New since this plan"
     fb = []

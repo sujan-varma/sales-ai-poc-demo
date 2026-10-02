@@ -10,6 +10,8 @@ updates and notifications) is stored here, and every write is checked against th
   events        the officer starts / updates / completes an action in the mobile app. Works for assigned actions
                 and for the ones the app derives from the workbook (stored as overrides). The ASM gets a notification.
   reminders     assigned actions due today or overdue send one reminder per action per day.
+  visits        the officer checks in to / out of a visit in the app (stored per officer and visit), so a reload or a
+                push that reopens the app keeps the check-in and the actions it unlocks.
   bootstrap     GET /api/app/bootstrap merges all of the above into the officer's actions and notifications.
 
 Users: a sales officer is their id (SO018); an ASM is "asm:<name>" (asm:Raman).
@@ -59,7 +61,7 @@ def asm_user(name: str) -> str:
 # ---------------------------------------------------------------- store
 
 class TrackerStore:
-    EMPTY = {"seq": 1000, "actions": [], "notifications": [], "overrides": {}, "read": {}, "reminders": {}}
+    EMPTY = {"seq": 1000, "actions": [], "notifications": [], "overrides": {}, "read": {}, "reminders": {}, "visits": {}}
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -306,8 +308,10 @@ def reset(wb: Workbook, assigned_by: Optional[str] = None) -> dict[str, int]:
             ov_ids = {k.split("|", 1)[1] for k in ovs}
             drop = lambda n: n["aid"] in gone or n["aid"] in ov_ids or push.same_user(n["to"], asm_user(assigned_by)) or n["to"] in sos
             reads = [k for k in state["read"] if k.upper() in sos]
+            vis = [k for k in state["visits"] if k.split("|", 1)[0] in sos]
         else:
             gone, ovs, reads = {a["id"] for a in state["actions"]}, list(state["overrides"]), list(state["read"])
+            vis = list(state["visits"])
             drop = lambda n: True
         n0 = len(state["notifications"])
         state["actions"] = [a for a in state["actions"] if a["id"] not in gone]
@@ -317,6 +321,8 @@ def reset(wb: Workbook, assigned_by: Optional[str] = None) -> dict[str, int]:
             del state["overrides"][k]
         for k in reads:
             del state["read"][k]
+        for k in vis:
+            del state["visits"][k]
         state["epoch"] = state.get("epoch", 0) + 1
         return {"actions": len(gone), "notifications": n0 - len(state["notifications"]), "overrides": len(ovs)}
 
@@ -358,6 +364,26 @@ async def apply_event(wb: Workbook, action_id: str, ev: dict[str, Any]) -> dict[
         st = target["st"]
     await _deliver([n])
     return {"id": action_id, "st": st, "notified": asm_user(asm)}
+
+
+def visit_event(wb: Workbook, visit_id: str, ev: dict[str, Any]) -> dict[str, Any]:
+    """checkin / checkout from the officer's app. The visit's retailer must be one this officer serves."""
+    o = find_officer(wb, ev["so"])
+    if not o:
+        raise TrackerError(404, f"Sales officer '{ev['so']}' is not in 4. Retailer_Master")
+    r = _people(wb)["retailers"].get(str(ev["retailer_id"]))
+    if r is None or str(r["Sales officer ID"]) != o["id"]:
+        raise TrackerError(404, f"{visit_id}: retailer '{ev['retailer_id']}' is not served by {o['id']}")
+    now = _ms()
+    with get_store().edit() as state:
+        v = state["visits"].setdefault(f"{o['id']}|{visit_id}", {"retailer_id": r["retailer_id"]})
+        if ev["type"] == "checkin":
+            v.update(state="checkedin", cin=now)
+            v.pop("cout", None)
+        else:
+            v.update(state="completed", cout=now)
+            v.setdefault("cin", now)
+        return {"id": visit_id, **v}
 
 
 # ---------------------------------------------------------------- the ASM's side: verify, send back, comment
@@ -525,6 +551,16 @@ def merge_into_bootstrap(data: dict[str, Any], today: dt.date) -> dict[str, Any]
             if a["st"] == "closed" and a.get("steps"):
                 for s in a["steps"]:
                     s["done"] = True
+
+    # check-ins / check-outs from the app
+    for v in data["visits"]:
+        sv = state["visits"].get(f"{so}|{v['id']}")
+        if sv and sv["retailer_id"] == v["retailer_id"]:
+            if sv["state"] == "completed" and v["state"] != "completed":
+                data["home"]["visits_done"] += 1
+            v["state"], v["cin"] = sv["state"], sv["cin"]
+            if sv.get("cout"):
+                v["cout"] = sv["cout"]
 
     mine = [app_action(a, users, today, data["visits"]) for a in state["actions"] if a["assignee"].get("id") == so]
     data["actions"] = mine + data["actions"]
