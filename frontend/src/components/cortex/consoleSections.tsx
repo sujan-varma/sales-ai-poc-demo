@@ -400,6 +400,7 @@ export function ConsoleThermometer() {
 
 export function ConsoleHuddle() {
   const { toast } = useHome();
+  const go = useCortexNav();
   const scroller = useRef<HTMLDivElement>(null);
   const [fade, setFade] = useState(false);
   const ordered = [...FINDINGS].sort((a, b) => {
@@ -431,7 +432,7 @@ export function ConsoleHuddle() {
         icon={<AgentIcon agent="huddle" />}
         badge={<AiTag />}
         subtitle="Quoted from calls and huddles · each traceable to its transcript"
-        right={<MoreButton onClick={() => toast("Opens Huddle · everything inferred today.")}>View all</MoreButton>}
+        right={<MoreButton onClick={() => go("huddle")}>View all</MoreButton>}
       />
       {/* The list is absolutely positioned so it never grows the row: Territory Health sets the height. */}
       <div className="relative min-h-[280px] flex-1">
@@ -584,7 +585,8 @@ export function ConsoleAgentRow({ variant = "a" }: { variant?: "a" | "b" }) {
     if (id === "thermometer") return go(role === "head" ? "thermometer-head" : "thermometer");
     if (id === "map" && role === "asm") return go("map-plans");
     if (id === "pitch" && role === "asm") return go("pitch");
-    toast(id === "huddle" ? "The Huddle agent page isn't built in this prototype yet." : `${name} is the ASM's agent; you see it through the roll-ups.`);
+    if (id === "huddle") return go("huddle");
+    toast(`${name} is the ASM's agent; you see it through the roll-ups.`);
   };
   const radius = "rounded-lg";
   // Both options: label beside the icon. Option B: grayscale icons (shape only) and "… agent" names.

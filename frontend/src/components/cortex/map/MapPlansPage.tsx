@@ -502,7 +502,7 @@ function SinceLocked({ onClose, onItem }: { onClose: () => void; onItem: (id: st
                     <span>
                       <span className="text-cx-text">{AGENTS[s.agent].name}</span> <span className="text-cx-faint">· {s.when}</span>
                     </span>
-                    <button onClick={() => (s.agent === "thermometer" ? go("thermometer") : toast("Opens Huddle."))} className="text-[#4f86f7] hover:underline">
+                    <button onClick={() => (s.agent === "thermometer" ? go("thermometer") : go("huddle"))} className="text-[#4f86f7] hover:underline">
                       Open in {AGENTS[s.agent].name}
                     </button>
                   </p>

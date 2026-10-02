@@ -23,7 +23,11 @@ export type CortexPage =
   | "tracker"
   | "tracker-head"
   | "asm-priority-log"
-  | "asm-activity-log";
+  | "asm-activity-log"
+  | "huddle"
+  | "huddle-meetings"
+  | "huddle-series"
+  | "huddle-meeting";
 
 export const PAGE_HREF: Record<CortexPage, string> = {
   asm: "/asm",
@@ -42,6 +46,10 @@ export const PAGE_HREF: Record<CortexPage, string> = {
   "tracker-head": "/leadership/tracker",
   "asm-priority-log": "/asm/logs/priority",
   "asm-activity-log": "/asm/logs/activity",
+  huddle: "/huddle",
+  "huddle-meetings": "/huddle/meetings",
+  "huddle-series": "/huddle/series",
+  "huddle-meeting": "/huddle/meeting",
 };
 
 /** Where a result link ("View in Pitch", "View plan") leads, when that page is built. */

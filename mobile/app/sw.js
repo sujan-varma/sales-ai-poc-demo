@@ -25,13 +25,25 @@ self.addEventListener('push', (e) => {
   ]));
 });
 
+// a tap while the app is open in the background: also kept here until the app asks for it (or says it opened it),
+// because a suspended page can miss the message (iPhone)
+let pendingOpen = null;
+self.addEventListener('message', (e) => {
+  const m = e.data || {};
+  if (m.type === 'pending?') {
+    const p = pendingOpen; pendingOpen = null;
+    if (p && Date.now() - p.ts < 60000 && e.source) e.source.postMessage({ type: 'open', aid: p.aid });
+  } else if (m.type === 'opened') pendingOpen = null;
+});
+
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const d = e.notification.data || {};
   const url = self.registration.scope + (d.so ? '?so=' + encodeURIComponent(d.so) : '') + (d.aid ? '#a=' + encodeURIComponent(d.aid) : '');
   e.waitUntil(appClients().then((l) => {
     const c = l.find((x) => 'focus' in x);
-    if (c) { c.postMessage({ type: 'open', aid: d.aid }); return c.focus(); }
+    // the app opens the action itself (it waits until it has loaded); if the window can't be focused, open a new one
+    if (c) { if (d.aid) pendingOpen = { aid: d.aid, ts: Date.now() }; c.postMessage({ type: 'open', aid: d.aid }); return c.focus().catch(() => self.clients.openWindow(url)); }
     return self.clients.openWindow(url);
   }));
 });

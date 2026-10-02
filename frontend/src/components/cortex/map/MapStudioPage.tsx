@@ -613,7 +613,7 @@ function ConsiderPanel({ open, setOpen, items, onAsk, overlay }: { open: boolean
               <button onClick={() => onAsk(c.text)} className="text-[#4f86f7] hover:underline">
                 Ask about this
               </button>
-              <button onClick={() => (c.open === "thermometer" ? go("thermometer") : toast("The Huddle agent page isn't built in this prototype yet."))} className="text-cx-muted hover:text-cx-text">
+              <button onClick={() => (c.open === "thermometer" ? go("thermometer") : go("huddle"))} className="text-cx-muted hover:text-cx-text">
                 Open in {c.open === "thermometer" ? "Thermometer" : "Huddle"}
               </button>
             </p>

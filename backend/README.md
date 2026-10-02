@@ -84,6 +84,7 @@ On a list endpoint, `total` is the number of rows matching the search and filter
 | POST | `/api/tracker/actions/{id}/review` | – | `{ by, decision: verify\|send_back, note? }` from the web Tracker. For an officer's own field action add `so`, `retailer_id`, `signal`. Notifies the officer |
 | POST | `/api/tracker/actions/{id}/comment` | – | `{ by, text }` (same extra fields for a field action). The ASM's comment, shown in the officer's app |
 | POST | `/api/tracker/reminders/run` | API key | Sends due-today / overdue reminders for open assigned actions, once per action per day |
+| POST | `/api/tracker/reset?assigned_by=Raman` | – (API key without `assigned_by`) | The web's *Reset for demo*: clears that ASM's assigned actions and the notifications in the mobile app, so the Action Tracker items (*Suggested by Sales AI*, *Needs an owner*) can be assigned again. See [Reset for testing](#reset-for-testing) |
 | GET | `/api/web/bootstrap?asm=Raman` | – | Everything the Cortex web app (Next.js) shows, built from the workbook; `data.data_gaps` lists what's missing |
 | GET | `/api/web/data-gaps` | – | What the workbook can't provide to the web app |
 | GET | `/api/app/bootstrap?so=SO018` | – | Everything the mobile app shows for one sales officer (see below) |
@@ -132,6 +133,18 @@ Built by `app/services/web_plan.py` for the ASM, from the workbook:
 | Pitch | One pitch per outlet the plan reaches; KPIs and talking points from the outlet's own rows (tenure, credit, SKU gap in `11. Sep projections`, loyalty pitch statement, short supply). Visited = last SO visit on or after 1 Sep |
 | Tracker | The ASM's signal groups (Needs an owner) and the officers' retailer actions (Team), plus — per request, from `tracker.json` — assignments, the officers' updates and completions, and verifications |
 
+## Huddle data (`huddle` in `/api/web/bootstrap`)
+
+Built by `app/services/web_huddle.py` from the `Huddle` sheet for the ASM's team. The sheet has themes (owner, urgency, session, verbatim, action count) but no dates, attendance or decisions, so:
+
+- Sales-owned themes are the team's daily **Morning** and **Evening** huddles; other departments' themes are **ad-hoc** cross-functional calls. They are laid out over the last seven working days to 20 Sep, in sheet order.
+- One action per theme (owner = its designation, the sheet's action count, due by urgency). **Assign action** calls `/api/tracker/assign` with `source_id = hud-<theme>`, so it becomes a Tracker ticket and its status shows on the huddle pages.
+- High urgency = systemic blocker; medium urgency owned by another team = incomplete discussion.
+- Each theme is checked against the region's workbook signals (credit, targets, short supply, market share, distributor trend, loyalty); a match shows as evidence and raises confidence.
+- **Capability Building** per meeting uses SalesPulze's criteria and weights (Action Item Quality and Decisions Made 15%, BDE Performance Effectiveness 25%, Beat Plan Adherence 25%, Reach Expansion Review 25%, Throughput & Revenue 5%, Throughput & Revenue Recovery 5%). A criterion scores 0 / 60 / 80 / 100 when none, one, two or three-plus of the meeting's themes cover it; the themes are the evidence. Hygiene and actual durations show as not recorded.
+- **Field Operations Health** (`ENTITIES`) scores every region (level 2), territory (3) and sales officer (4) on the same criteria from the workbook: beat plan = retailers visited in the last 30 days, reach = retailers billed in September, throughput = September MTD sales vs phased target, recovery = 1 − overdue / outstanding, BDE = influencer activation vs target, action quality = huddle themes with an owner and 3+ actions (only where huddles exist). Bands: Healthy 80–100, Moderate 60–80, Attention 40–60, Critical 0–40.
+- Themes are tagged with product categories (`2. Products`), business segments and the owning function, for the repository filters, Product Discussion Coverage and Action Execution Overview.
+
 ## Mobile app data (`/api/app/bootstrap`)
 
 Every screen's data for one sales officer comes from the Excel workbook. `?so=` takes an ID or a name and defaults to `DEFAULT_SALES_OFFICER` (`SO018`). `?today=` defaults to `APP_TODAY` (`2026-09-21`, the day after the workbook's actuals end).
@@ -168,6 +181,19 @@ The Excel workbook stays read-only. Assignments, status changes and notification
 5. **Remind.** `POST /api/tracker/reminders/run`, or `REMINDER_INTERVAL_MINUTES`, sends `due` / `overdue` reminders for open assigned actions, relative to `APP_TODAY`.
 
 `GET /api/app/bootstrap` merges all of this in, so a reload shows the same status, outcomes and read state.
+
+### Reset for testing
+
+An item assigned from the Home page's Action Tracker stays assigned (its Assign control is hidden) until the action is closed. **Reset for demo** (bottom of the web app's agent rail) starts over: it calls `POST /api/tracker/reset?assigned_by=<ASM>`, which removes the actions that ASM assigned, the officers' updates on that ASM's retailers, and the notifications and read state of the ASM and their officers. Then the web app reloads on the ASM Home. An open mobile app reloads itself on its next inbox check (within 20 s, or when it comes to the front).
+
+From a terminal, the same for one ASM, or everything (needs the key):
+
+```bash
+curl -X POST "http://localhost:8000/api/tracker/reset?assigned_by=Raman"
+curl -X POST -H "X-API-Key: $API_KEY" "http://localhost:8000/api/tracker/reset"
+```
+
+Ids keep counting up, so a new assignment never reuses an old id.
 
 ### Web Push (the mobile app)
 

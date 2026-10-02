@@ -22,7 +22,11 @@ export type CortexView =
   | "pitch-detail"
   | "pitch-adhoc"
   | "tracker"
-  | "tracker-head";
+  | "tracker-head"
+  | "huddle"
+  | "huddle-meetings"
+  | "huddle-series"
+  | "huddle-meeting";
 
 type Loader = () => Promise<{ default: React.ComponentType }>;
 
@@ -43,6 +47,10 @@ const LOADERS: Record<CortexView, Loader> = {
   "pitch-adhoc": () => import("@/components/cortex/pitch/PitchAdhocPage").then((m) => ({ default: m.PitchAdhocPage })),
   tracker: () => import("@/components/cortex/tracker/TrackerPage").then((m) => ({ default: () => <m.TrackerPage persona="asm" /> })),
   "tracker-head": () => import("@/components/cortex/tracker/TrackerPage").then((m) => ({ default: () => <m.TrackerPage persona="head" /> })),
+  huddle: () => import("@/components/cortex/huddle/IntelHubPage").then((m) => ({ default: m.IntelHubPage })),
+  "huddle-meetings": () => import("@/components/cortex/huddle/MeetingRepositoryPage").then((m) => ({ default: m.MeetingRepositoryPage })),
+  "huddle-series": () => import("@/components/cortex/huddle/SeriesPage").then((m) => ({ default: m.SeriesPage })),
+  "huddle-meeting": () => import("@/components/cortex/huddle/MeetingPage").then((m) => ({ default: m.MeetingPage })),
 };
 
 function Centered({ children }: { children: React.ReactNode }) {

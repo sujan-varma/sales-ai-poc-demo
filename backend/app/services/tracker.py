@@ -288,6 +288,39 @@ def list_actions(assigned_by: Optional[str] = None, so: Optional[str] = None) ->
     return sorted(acts, key=lambda a: -a["created"])
 
 
+def reset(wb: Workbook, assigned_by: Optional[str] = None) -> dict[str, int]:
+    """Testing / the web's "Reset for demo": back to a clean start, so the web items actions came from (Suggested by
+    Sales AI, Needs an owner) can be assigned again and the officers' apps start over.
+
+    With `assigned_by`, only that ASM's demo: the actions they assigned, the officers' updates on their retailers'
+    field actions, their own inbox, and the notifications and read state of the officers who report to them.
+    Without it, everything. `seq` keeps counting, so ids are never reused (an open app would otherwise mix an old
+    ACT-1001 with a new one), and `epoch` goes up so open apps reload."""
+    P = _people(wb)
+    with get_store().edit() as state:
+        if assigned_by:
+            mine = lambda name: push.same_user(name, assigned_by)
+            sos = {o["id"] for o in P["officers"].values() if mine(o["asm"])}
+            gone = {a["id"] for a in state["actions"] if mine(a["assigned_by"]["name"])}
+            ovs = [k for k, v in state["overrides"].items() if (r := P["retailers"].get(str(v.get("retailer_id")))) and mine(r["ASM Name"])]
+            ov_ids = {k.split("|", 1)[1] for k in ovs}
+            drop = lambda n: n["aid"] in gone or n["aid"] in ov_ids or push.same_user(n["to"], asm_user(assigned_by)) or n["to"] in sos
+            reads = [k for k in state["read"] if k.upper() in sos]
+        else:
+            gone, ovs, reads = {a["id"] for a in state["actions"]}, list(state["overrides"]), list(state["read"])
+            drop = lambda n: True
+        n0 = len(state["notifications"])
+        state["actions"] = [a for a in state["actions"] if a["id"] not in gone]
+        state["notifications"] = [n for n in state["notifications"] if not drop(n)]
+        state["reminders"] = {k: v for k, v in state["reminders"].items() if k.split("|", 1)[0] not in gone}
+        for k in ovs:
+            del state["overrides"][k]
+        for k in reads:
+            del state["read"][k]
+        state["epoch"] = state.get("epoch", 0) + 1
+        return {"actions": len(gone), "notifications": n0 - len(state["notifications"]), "overrides": len(ovs)}
+
+
 # ---------------------------------------------------------------- events from the app
 
 async def apply_event(wb: Workbook, action_id: str, ev: dict[str, Any]) -> dict[str, Any]:
@@ -505,6 +538,7 @@ def merge_into_bootstrap(data: dict[str, Any], today: dt.date) -> dict[str, Any]
     stored = [app_notification(n) for n in state["notifications"] if push.same_user(n["to"], so)]
     data["notifications"] = sorted(stored + derived, key=lambda n: -n["ts"])
     data["inbox_since"] = max((n["ts"] for n in stored), default=0)
+    data["tracker_epoch"] = state.get("epoch", 0)  # goes up on a reset; the app reloads when it changes
     return data
 
 
@@ -528,4 +562,4 @@ def app_inbox(wb: Workbook, so: str, since: int, today: dt.date) -> dict[str, An
     return {"notifications": [app_notification(n) for n in new], "actions": actions, "patches": patches,
             "users": {k: v for k, v in users.items() if k not in base},
             "unread": sum(1 for n in state["notifications"] if push.same_user(n["to"], o["id"]) and not n["read"]),
-            "since": max([since] + [n["ts"] for n in new])}
+            "since": max([since] + [n["ts"] for n in new]), "epoch": state.get("epoch", 0)}

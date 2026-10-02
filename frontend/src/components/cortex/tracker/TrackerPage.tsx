@@ -377,7 +377,7 @@ function TicketDrawer({ t, who, onClose, onChange }: { t: Ticket; who: Who; onCl
 
   const sourceLink = (): { label: string; act: () => void } | null => {
     if (t.source === "thermometer") return { label: "Open in Thermometer", act: () => go("thermometer") };
-    if (t.source === "huddle") return { label: "Open in Huddle", act: () => toast("Opens Huddle at the transcript segment.") };
+    if (t.source === "huddle") return { label: "Open in Huddle", act: () => go("huddle") };
     if (t.source === "map" && !head) return { label: "Open the plan row", act: () => (openSeptemberPlan(), go("map-plans")) };
     return null;
   };
