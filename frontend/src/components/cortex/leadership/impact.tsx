@@ -44,7 +44,8 @@ export function ImpactMetrics() {
   const range = useRange();
   const done = RANGE_DATA[range.id].actions.done;
   // action counts follow the date filter; the scores are Sales AI's current learning
-  const k = done / ORG_ACTIONS.counts.done;
+  // no completed actions in the data yet: show the counts as they are
+  const k = ORG_ACTIONS.counts.done ? done / ORG_ACTIONS.counts.done : 1;
   const up = IMPACT_ROWS.filter((r) => r.score - r.lastMonth >= 2).length;
   const down = IMPACT_ROWS.filter((r) => r.lastMonth - r.score >= 2).length;
   const th = "px-3 py-2.5 text-left text-[11px] font-normal text-cx-faint";

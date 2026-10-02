@@ -26,6 +26,7 @@ import { AiTag, ConfidenceScore } from "./ai";
 import { pct } from "./charts";
 import { useStatusMeta } from "./statusPalette";
 import { useHome } from "./HomeState";
+import { useCortexNav } from "./nav";
 import { AgentChip, AgentIcon, ConnectChip, Panel, SectionTitle } from "./primitives";
 
 const BLUE = "#4f86f7";
@@ -576,7 +577,15 @@ export function ConsoleKpiBar({ variant = "a", planTarget = "map-panel" }: { var
 // ---------------------------------------------------------------------------
 
 export function ConsoleAgentRow({ variant = "a" }: { variant?: "a" | "b" }) {
-  const { toast } = useHome();
+  const { toast, role } = useHome();
+  const go = useCortexNav();
+  // each card lands on its agent; Huddle has no agent page in this prototype yet
+  const open = (id: string, name: string) => {
+    if (id === "thermometer") return go(role === "head" ? "thermometer-head" : "thermometer");
+    if (id === "map" && role === "asm") return go("map-plans");
+    if (id === "pitch" && role === "asm") return go("pitch");
+    toast(id === "huddle" ? "The Huddle agent page isn't built in this prototype yet." : `${name} is the ASM's agent; you see it through the roll-ups.`);
+  };
   const radius = "rounded-lg";
   // Both options: label beside the icon. Option B: grayscale icons (shape only) and "… agent" names.
   const beside = true;
@@ -610,7 +619,7 @@ export function ConsoleAgentRow({ variant = "a" }: { variant?: "a" | "b" }) {
           ) : (
             <button
               key={a.id}
-              onClick={() => toast(`Opens ${a.name}.`)}
+              onClick={() => open(a.id, a.name)}
               className={`group flex border border-cx-line bg-cx-panel px-4 text-left transition-colors hover:border-cx-strong ${radius} ${beside ? "items-center gap-3 py-3" : "flex-col py-3.5"}`}
             >
               {beside ? (

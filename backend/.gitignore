@@ -6,3 +6,5 @@ data/tokens.json
 data/*.tmp
 data/tracker.json
 data/vapid.pem
+server.log
+server.err.log

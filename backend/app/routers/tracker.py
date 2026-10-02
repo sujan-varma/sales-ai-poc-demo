@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config import get_settings
 from app.routers.sales import _workbook
-from app.schemas import ActionEvent, ApiResponse, AssignRequest
+from app.schemas import ActionEvent, ApiResponse, AsmCommentRequest, AssignRequest, ReviewRequest
 from app.security import require_api_key
 from app.services import tracker
 
@@ -46,6 +46,32 @@ def actions(
 async def event(action_id: str, ev: ActionEvent):
     try:
         data = await tracker.apply_event(_workbook(), action_id, ev.model_dump())
+    except tracker.TrackerError as e:
+        raise HTTPException(e.status, str(e))
+    return ApiResponse(data=data, total=1)
+
+
+@router.post(
+    "/actions/{action_id}/review",
+    response_model=ApiResponse[dict[str, Any]],
+    summary="The ASM verifies and closes, or sends back, an action; notifies the officer",
+)
+async def review(action_id: str, req: ReviewRequest):
+    try:
+        data = await tracker.review(_workbook(), action_id, req.model_dump())
+    except tracker.TrackerError as e:
+        raise HTTPException(e.status, str(e))
+    return ApiResponse(data=data, total=1)
+
+
+@router.post(
+    "/actions/{action_id}/comment",
+    response_model=ApiResponse[dict[str, Any]],
+    summary="The ASM comments on an action; the officer sees it in the app",
+)
+async def asm_comment(action_id: str, req: AsmCommentRequest):
+    try:
+        data = await tracker.asm_comment(_workbook(), action_id, req.model_dump())
     except tracker.TrackerError as e:
         raise HTTPException(e.status, str(e))
     return ApiResponse(data=data, total=1)

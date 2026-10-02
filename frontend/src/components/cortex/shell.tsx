@@ -5,7 +5,7 @@
 // menu, and the AI Assistant drawer. Pages supply only their content.
 
 import React, { useEffect, useRef, useState } from "react";
-import { Bot, Check, PanelLeftClose, PanelLeftOpen, Search, SlidersHorizontal, UserMinus } from "lucide-react";
+import { Bot, Check, PanelLeftClose, PanelLeftOpen, RotateCcw, Search, SlidersHorizontal, UserMinus } from "lucide-react";
 import { AGENTS, AGENT_ORDER, AgentId, VIEWER } from "@/data/cortexHome";
 import { AiStyleProvider } from "./ai";
 import { AssistantDrawer, ASSISTANT_PUSH } from "./assistant";
@@ -140,6 +140,7 @@ function TopNav({
   actions,
   extra,
   onAgents,
+  studio = false,
 }: {
   persona: Persona;
   personaOptions: Persona[];
@@ -151,8 +152,22 @@ function TopNav({
   /** sits right beside the persona menu (Leadership: the date filter) */
   extra?: React.ReactNode;
   onAgents: () => void;
+  /** Studio mode: no wordmark or tabs; only the persona cluster, at the far right */
+  studio?: boolean;
 }) {
   const { toast } = useHome();
+  if (studio)
+    return (
+      <header className="relative z-30 flex h-12 items-center gap-2 px-3">
+        <button onClick={onAgents} className={`${iconBtn} md:hidden`} aria-label="Agents">
+          <PanelLeftOpen className="h-4 w-4" />
+        </button>
+        <div className="ml-auto flex items-center gap-1.5">
+          <AssistantMenu />
+          <PersonaMenu persona={persona} options={personaOptions} onChange={onPersona} />
+        </div>
+      </header>
+    );
   return (
     <header className="cx-land-fade relative z-30 flex h-16 items-center gap-3 px-4 sm:px-6">
       <button onClick={onAgents} className={`${iconBtn} md:hidden`} aria-label="Agents">
@@ -187,6 +202,26 @@ function TopNav({
   );
 }
 
+/** Reset for demo: everything added, saved or started in a walkthrough goes back to a clean start. */
+function resetDemo() {
+  if (!window.confirm("Reset the demo? Plans saved, pitches pushed, tickets closed and filters set in this walkthrough go back to the starting state.")) return;
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (k && k.startsWith("cx-")) keys.push(k);
+    }
+    keys.forEach((k) => sessionStorage.removeItem(k));
+  } catch {
+    /* storage unavailable: nothing was kept */
+  }
+  // land on the ASM homepage, fresh
+  if (location.protocol === "file:" || location.hash) {
+    location.hash = "#asm";
+    location.reload();
+  } else location.assign("/asm");
+}
+
 // ---------------------------------------------------------------------------
 // Thin agent rail
 // ---------------------------------------------------------------------------
@@ -215,8 +250,15 @@ function AgentRail({ expanded, setExpanded, persona, configActive, activeAgent }
           {AGENT_ORDER.map((a) => (
             <li key={a} className="group/tip relative">
               <button
-                // Thermometer has its own page; the other agents aren't built in this flow yet
-                onClick={() => (a === "thermometer" ? go(persona === "head" ? "thermometer-head" : "thermometer") : toast(`Opens ${AGENTS[a].name}.`))}
+                // Thermometer has a page for both personas; MAP and Pitch are the ASM's.
+                // Huddle has no agent page in this prototype yet, so it says so instead of pretending to navigate.
+                onClick={() => {
+                  if (a === "thermometer") go(persona === "head" ? "thermometer-head" : "thermometer");
+                  else if (a === "map" && persona === "asm") go("map-plans");
+                  else if (a === "pitch" && persona === "asm") go("pitch");
+                  else if (a === "huddle") toast("The Huddle agent page isn't built in this prototype yet.");
+                  else toast(`${AGENTS[a].name} is the ASM's agent; the Head of Sales sees it through the roll-ups.`);
+                }}
                 aria-label={`${AGENTS[a].name} agent`}
                 aria-current={activeAgent === a ? "page" : undefined}
                 className={`flex w-full items-center gap-2.5 rounded-md p-1.5 hover:bg-cx-hover ${activeAgent === a ? "bg-cx-hover" : ""} ${expanded ? "" : "justify-center"}`}
@@ -262,6 +304,24 @@ function AgentRail({ expanded, setExpanded, persona, configActive, activeAgent }
           </li>
         </ul>
         <div className="group/tip relative mx-2 mt-auto">
+          <button
+            onClick={resetDemo}
+            aria-label="Reset for demo"
+            className={`flex h-9 w-full items-center gap-2.5 rounded-md px-2 text-[12.5px] text-cx-muted hover:bg-cx-hover hover:text-cx-text ${expanded ? "" : "justify-center"}`}
+          >
+            <RotateCcw className="h-4 w-4 shrink-0" />
+            {expanded && "Reset for demo"}
+          </button>
+          {!expanded && (
+            <span
+              role="tooltip"
+              className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md border border-cx-strong bg-cx-raised px-2 py-1 text-[12px] text-cx-text shadow-xl group-hover/tip:block group-focus-within/tip:block"
+            >
+              Reset for demo
+            </span>
+          )}
+        </div>
+        <div className="group/tip relative mx-2 mt-1">
           <button
             // Configuration belongs to the Head of Sales: platform settings and decision thresholds
             onClick={() => (persona === "head" ? go("configuration") : toast("Opens Configuration: agents, thresholds, data sources."))}
@@ -323,13 +383,14 @@ export function PageFrame({
   persona,
   personaOptions = ["asm", "head", "exec"],
   onPersona,
-  tabs = ["Home", "Action Tracker", "Market Action Plan", "Reports"],
+  tabs = ["Home", "Action Tracker", "Logs"],
   currentTab = 0,
   onTab,
   configActive = false,
   activeAgent,
   navActions,
   topBarExtra,
+  studio = false,
   children,
 }: {
   persona: Persona;
@@ -345,6 +406,8 @@ export function PageFrame({
   activeAgent?: AgentId;
   navActions?: React.ReactNode;
   topBarExtra?: React.ReactNode;
+  /** full-screen Studio mode (MAP Studio, ad hoc Pitch): no standard top bar, no page gutters */
+  studio?: boolean;
   children: React.ReactNode;
 }) {
   const { assistantOpen } = useHome();
@@ -354,10 +417,10 @@ export function PageFrame({
     <div className={`relative min-h-screen overflow-x-clip transition-[padding] duration-200 ${assistantOpen && !bare ? ASSISTANT_PUSH : ""}`}>
       {!bare && <AssistantDrawer />}
       {/* the one glow moment, behind the nav + hero */}
-      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[640px]" style={{ background: "var(--cx-hero-glow)" }} />
+      {!studio && <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[640px]" style={{ background: "var(--cx-hero-glow)" }} />}
       {!bare && <AgentRail expanded={railOpen} setExpanded={setRailOpen} persona={persona} configActive={configActive} activeAgent={activeAgent} />}
       <div className={`relative ${!bare ? "md:pl-14" : ""}`}>
-        <div className="mx-auto max-w-[1440px]">
+        <div className={studio ? "" : "mx-auto max-w-[1440px]"}>
           <TopNav
             persona={persona}
             personaOptions={personaOptions}
@@ -368,6 +431,7 @@ export function PageFrame({
             actions={bare ? undefined : navActions}
             extra={bare ? undefined : topBarExtra}
             onAgents={() => setRailOpen(true)}
+            studio={studio}
           />
           {children}
         </div>

@@ -9,6 +9,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { AGENTS, AgentRun } from "@/data/cortexHome";
 import { useHome } from "./HomeState";
+import { linkPage, useCortexNav } from "./nav";
 import { AgentIcon } from "./primitives";
 
 const STEP_MS = 850;
@@ -24,7 +25,8 @@ export function useBrand() {
 
 /** Mount it to start the run; re-key it to run again. */
 export function AgentRunChip({ run, onDone, minMs = 0, block = false }: { run: AgentRun; onDone?: () => void; minMs?: number; block?: boolean }) {
-  const { toast } = useHome();
+  const { toast, role } = useHome();
+  const go = useCortexNav();
   const [step, setStep] = useState(0);
   const done = step >= run.steps.length;
 
@@ -68,7 +70,15 @@ export function AgentRunChip({ run, onDone, minMs = 0, block = false }: { run: A
       <Check className="h-3.5 w-3.5 shrink-0" style={{ color: "#2fa85c" }} />
       {/* always one line: long results end in "…", the full text is in the tooltip */}
       <span className="min-w-0 truncate text-cx-text">{run.result}</span>
-      <button onClick={() => toast(`Opens: ${run.link.replace("View ", "")}.`)} className="shrink-0 whitespace-nowrap text-[#4f86f7] hover:underline">
+      <button
+        onClick={() => {
+          // a result that landed in the October draft opens the draft itself, in MAP Studio
+          const to = role === "asm" && /october (plan )?draft/i.test(run.result) ? "map-studio" : linkPage(run.link, role);
+          if (to) go(to);
+          else toast(`Opens: ${run.link.replace("View ", "")}.`);
+        }}
+        className="shrink-0 whitespace-nowrap text-[#4f86f7] hover:underline"
+      >
         {run.link} →
       </button>
     </span>

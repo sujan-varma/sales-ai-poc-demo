@@ -11,6 +11,7 @@ import { DEFAULT_FILTERS, FY_LABEL, SYNC_NOTE, ThermoFilters, ThermoPersona, gro
 import { useHome } from "../HomeState";
 import { CortexPageRoot, PageFrame, Persona } from "../shell";
 import { useCortexNav } from "../nav";
+import { useAsmNav } from "../asmNav";
 import { AgentIcon } from "../primitives";
 import { LeadershipProvider, useHeadNav } from "../leadership/common";
 import { Link } from "./engine";
@@ -39,14 +40,14 @@ export function ThermometerPage({ persona }: { persona: ThermoPersona }) {
 function AsmFrame() {
   const { setRole } = useHome();
   const go = useCortexNav();
+  const asmNav = useAsmNav("none");
   useEffect(() => setRole("asm"), [setRole]);
   return (
     <PageFrame
       persona="asm"
       personaOptions={["asm", "head"]}
       onPersona={(p: Persona) => p === "head" && go("thermometer-head")}
-      currentTab={-1}
-      onTab={(i) => (i === 0 ? (go("asm"), true) : false)}
+      {...asmNav}
       activeAgent="thermometer"
     >
       <Body persona="asm" />

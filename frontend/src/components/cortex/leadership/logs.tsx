@@ -183,12 +183,24 @@ export function RollupLog() {
 // Priority-tiered log
 // ---------------------------------------------------------------------------
 
-/** Signal-strength glyph: priority 1 fills all six bars, priority 6 fills one. */
+/** Severity colours (DESIGN.md "Severity ramp"): existing status hues, one per tier. */
+export const TIER_COLOR: Record<number, string> = {
+  1: "#d64550", // Critical
+  2: "#e85a70", // High
+  3: "#e0b43a", // Elevated
+  4: "#7c7f89", // Standard
+  5: "#7c7f89", // Low (lighter, see TIER_OPACITY)
+  6: "#7c7f89", // Watch (lightest)
+};
+/** 4–6 share the neutral grey and step down in strength, so the ramp reads as declining. */
+export const TIER_OPACITY: Record<number, number> = { 1: 1, 2: 1, 3: 1, 4: 1, 5: 0.7, 6: 0.45 };
+
+/** Signal-strength glyph: priority 1 fills all six bars, priority 6 fills one, in the tier's colour. */
 function TierGlyph({ n, on }: { n: number; on: boolean }) {
   return (
     <span className="flex items-end gap-[2px]" aria-hidden>
       {[0, 1, 2, 3, 4, 5].map((i) => (
-        <span key={i} className="w-[2px] rounded-[1px]" style={{ height: 4 + i * 1.4, background: i < 7 - n ? (on ? "#4f86f7" : "rgb(var(--cx-muted))") : "rgb(var(--cx-strong))" }} />
+        <span key={i} className="w-[2px] rounded-[1px]" style={{ height: 4 + i * 1.4, background: i < 7 - n ? TIER_COLOR[n] : "rgb(var(--cx-strong))", opacity: i < 7 - n ? TIER_OPACITY[n] : 1 }} />
       ))}
     </span>
   );
@@ -196,22 +208,24 @@ function TierGlyph({ n, on }: { n: number; on: boolean }) {
 
 const PAGE = 12;
 
-export function PriorityLog() {
+export function PriorityLog({ fixedRegion }: { fixedRegion?: string } = {}) {
   const [tier, setTier] = useState(1);
-  const [region, setRegion] = useState<string | null>(null);
+  const [regionPick, setRegion] = useState<string | null>(null);
+  const region = fixedRegion ?? regionPick;
   const [status, setStatus] = useState<string | null>(null);
   const [all, setAll] = useState(false);
   const statusLabel: Record<string, string> = { delayed: "Delayed", progress: "In progress", unassigned: "No owner" };
+  const pool = (n: number) => TIER_ITEMS[n].filter((x) => !fixedRegion || x.region === fixedRegion);
   const items = TIER_ITEMS[tier]
     .filter((x) => (!region || x.region === region) && (!status || statusLabel[x.status] === status))
     .sort((a, b) => ["delayed", "unassigned", "progress"].indexOf(a.status) - ["delayed", "unassigned", "progress"].indexOf(b.status));
   const shown = all ? items : items.slice(0, PAGE);
   const t = TIERS[tier - 1];
-  const total = Object.values(TIER_ITEMS).reduce((n, xs) => n + xs.length, 0);
-  const delayed = TIER_ITEMS[tier].filter((x) => x.status === "delayed").length;
+  const total = TIERS.reduce((n, x) => n + pool(x.n).length, 0);
+  const delayed = pool(tier).filter((x) => x.status === "delayed").length;
 
   return (
-    <section id="priority-log" aria-labelledby="prio-title" className={card}>
+    <section id="priority-log-full" aria-labelledby="prio-title" className={card}>
       <div className="p-5 pb-4">
         <CardHeader
           id="prio-title"
@@ -232,15 +246,14 @@ export function PriorityLog() {
                   setTier(x.n);
                   setAll(false);
                 }}
-                className={`inline-flex h-8 items-center gap-2 rounded-full border pl-2.5 pr-3 text-[12px] transition-colors ${
-                  on ? "border-[#2f6fed]/60 bg-[#2f6fed]/15 text-cx-text" : "border-cx-line text-cx-muted hover:border-cx-strong hover:text-cx-text"
-                }`}
+                className={`inline-flex h-8 items-center gap-2 rounded-full border pl-2.5 pr-3 text-[12px] transition-colors ${on ? "text-cx-text" : "border-cx-line text-cx-muted hover:border-cx-strong hover:text-cx-text"}`}
+                style={on ? { borderColor: `${TIER_COLOR[x.n]}99`, background: `${TIER_COLOR[x.n]}1f` } : undefined}
               >
                 <TierGlyph n={x.n} on={on} />
                 <span>
                   Priority {x.n} <span className="hidden text-cx-faint sm:inline">· {x.label}</span>
                 </span>
-                <span className="font-data text-[11px] text-cx-faint">{TIER_ITEMS[x.n].length}</span>
+                <span className="font-data text-[11px] text-cx-faint">{pool(x.n).length}</span>
               </button>
             );
           })}
@@ -248,7 +261,10 @@ export function PriorityLog() {
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-y border-cx-line px-5 py-3">
         <p className="text-[12.5px] text-cx-muted">
-          <span className="text-cx-text">Priority {t.n}</span> · {t.desc} · <span className="font-data text-cx-text">{TIER_ITEMS[tier].length}</span> actions
+          <span className="inline-flex items-center gap-1.5 text-cx-text">
+            <span className="h-2 w-2 rounded-full" style={{ background: TIER_COLOR[t.n], opacity: TIER_OPACITY[t.n] }} aria-hidden /> Priority {t.n} · {t.label}
+          </span>{" "}
+          · {t.desc} · <span className="font-data text-cx-text">{pool(tier).length}</span> actions
           {delayed > 0 && (
             <>
               , <span className="font-data text-cx-text">{delayed}</span> delayed
@@ -256,7 +272,7 @@ export function PriorityLog() {
           )}
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <Dropdown label="Region" value={region} options={REGIONS.map((r) => r.name)} onChange={setRegion} />
+          {!fixedRegion && <Dropdown label="Region" value={region} options={REGIONS.map((r) => r.name)} onChange={setRegion} />}
           <Dropdown label="Status" value={status} options={["Delayed", "In progress", "No owner"]} onChange={setStatus} />
         </div>
       </div>
@@ -306,7 +322,7 @@ export function PriorityTop({ n = 7 }: { n?: number }) {
   const top = TIERS.flatMap((t) => [...TIER_ITEMS[t.n]].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status)).map((x) => ({ ...x, tier: t.n }))).slice(0, n);
   const total = Object.values(TIER_ITEMS).reduce((k, xs) => k + xs.length, 0);
   return (
-    <section id="priority-log" aria-labelledby="ptop-title" className={`${card} flex h-full flex-col`}>
+    <section id="priority-log-top" aria-labelledby="ptop-title" className={`${card} flex h-full flex-col`}>
       <div className="p-5 pb-3">
         <CardHeader
           id="ptop-title"
@@ -330,7 +346,7 @@ export function PriorityTop({ n = 7 }: { n?: number }) {
               </span>
               <span className="mt-0.5 flex items-center gap-2 text-[11px] text-cx-faint">
                 <span className="inline-flex items-center gap-1 whitespace-nowrap">
-                  <TierGlyph n={x.tier} on={false} /> P{x.tier}
+                  <TierGlyph n={x.tier} on={false} /> <span style={{ color: TIER_COLOR[x.tier], opacity: TIER_OPACITY[x.tier] }}>P{x.tier}</span> {TIERS[x.tier - 1].label}
                 </span>
                 <span className="truncate">
                   {x.territory} · {x.owner === "No owner" ? "no owner yet" : x.owner} · {x.due}

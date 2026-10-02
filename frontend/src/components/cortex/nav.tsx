@@ -7,7 +7,23 @@
 
 import React, { createContext, useContext } from "react";
 
-export type CortexPage = "asm" | "leadership" | "configuration" | "activity-log" | "priority-log" | "thermometer" | "thermometer-head";
+export type CortexPage =
+  | "asm"
+  | "leadership"
+  | "configuration"
+  | "activity-log"
+  | "priority-log"
+  | "thermometer"
+  | "thermometer-head"
+  | "map-studio"
+  | "map-plans"
+  | "pitch"
+  | "pitch-detail"
+  | "pitch-adhoc"
+  | "tracker"
+  | "tracker-head"
+  | "asm-priority-log"
+  | "asm-activity-log";
 
 export const PAGE_HREF: Record<CortexPage, string> = {
   asm: "/asm",
@@ -17,7 +33,26 @@ export const PAGE_HREF: Record<CortexPage, string> = {
   "priority-log": "/logs/priority",
   thermometer: "/thermometer",
   "thermometer-head": "/leadership/thermometer",
+  "map-studio": "/map/studio",
+  "map-plans": "/map",
+  pitch: "/pitch",
+  "pitch-detail": "/pitch/detail",
+  "pitch-adhoc": "/pitch/adhoc",
+  tracker: "/tracker",
+  "tracker-head": "/leadership/tracker",
+  "asm-priority-log": "/asm/logs/priority",
+  "asm-activity-log": "/asm/logs/activity",
 };
+
+/** Where a result link ("View in Pitch", "View plan") leads, when that page is built. */
+export function linkPage(link: string, role: "asm" | "head" = "asm"): CortexPage | null {
+  if (/tracker|ticket/i.test(link)) return role === "head" ? "tracker-head" : "tracker";
+  // MAP and Pitch are the ASM's pages; on the Head of Sales view these stay previews
+  if (role === "head") return null;
+  if (/pitch/i.test(link)) return "pitch";
+  if (/plan/i.test(link)) return "map-plans";
+  return null;
+}
 
 const NavCtx = createContext<(page: CortexPage) => void>((page) => {
   window.location.assign(PAGE_HREF[page]);

@@ -337,6 +337,7 @@ export const PLATFORM_SETTINGS: PlatformSetting[] = [
   { id: "stock", kind: "number", label: "Stock cover alert", help: "Thermometer raises a signal when a top outlet's cover drops below this.", value: 10, min: 3, max: 30, step: 1, unit: "days" },
   { id: "overdue", kind: "number", label: "Collection overdue signal", help: "Invoices older than this become a Thermometer signal.", value: 30, min: 15, max: 90, step: 5, unit: "days" },
   { id: "huddle", kind: "toggle", label: "Decode huddles when they end on schedule", help: "Sales AI starts on the transcript as soon as a scheduled huddle ends, without anyone asking.", value: true },
+  { id: "pitch-auto", kind: "choice", label: "Auto-push plan initiatives to Pitch", help: "When an ASM's plan is agreed, initiatives at or above this priority go to Pitch on their own. The rest are suggested in Pitch for the ASM to confirm.", value: "High priority only", options: ["High priority only", "High and Medium", "Never, always ask"] },
   { id: "sync", kind: "choice", label: "Cross-tool sync", help: "How often Sales AI merges actions from all tools into state-level initiatives.", value: "Every 4 hours", options: ["Every 2 hours", "Every 4 hours", "Twice a day", "Once a day"] },
 ];
 
@@ -373,3 +374,36 @@ export const THRESHOLDS: Threshold[] = [
 
 /** No configuration history in the workbook; this starts empty apart from the defaults being set. */
 export const CONFIG_HISTORY = [{ when: "Defaults", who: VIEWER.head.name, what: "Thresholds set to the platform defaults" }];
+
+// ---------------------------------------------------------------------------
+// Orchestration story — the Head of Sales homepage's live animation. A representative chain told one stage at a
+// time; the Activity Log stays the accurate, concurrent record. The counts come from the workbook's last data day
+// (SO visits, distributor orders, open signals, the weakest territory's projection).
+// ---------------------------------------------------------------------------
+
+export type StoryIcon = "sfa" | "tracker-thermo" | "map" | "thermometer" | "leadership";
+
+export interface StoryStage {
+  icon: StoryIcon;
+  /** who is acting, shown above the caption */
+  actor: string;
+  /** while live: what it's doing right now */
+  doing: string;
+  /** once done: what it did */
+  did: string;
+}
+
+export interface StoryRun {
+  id: string;
+  what: string;
+  where: string;
+  startedAt: string;
+  finishedAt: string;
+  stages: StoryStage[];
+}
+
+/** In progress when the homepage opens: the latest sync, for the default ASM's region. */
+export const LIVE_STORY = Ld<StoryRun>("LIVE_STORY");
+
+/** Shown when nothing is running: the previous complete run, across all regions. */
+export const LAST_STORY = Ld<StoryRun>("LAST_STORY");

@@ -22,6 +22,7 @@ import {
   INSIGHTS_SUMMARY,
   PLAN_META,
   PLAN_MONTHS,
+  PlanMonth,
   PlanMonthStatus,
   RECOMMENDATIONS,
   RecDecision,
@@ -34,6 +35,10 @@ import {
 import { AiMeta, AiTag } from "./ai";
 import { MapNodeTimeline, StatusLineChart, StatusMark, pct } from "./charts";
 import { useHome } from "./HomeState";
+import { useCortexNav } from "./nav";
+import { livePlanMonths, useLoop } from "./tracker/loop";
+import { useOctPlan } from "./map/octPlan";
+import { openOctoberPlan, openSeptemberPlan } from "./map/MapPlansPage";
 import { AgentIcon, ConnectChip, Panel, PanelHeader, SelectMenu, StatusBadge, TextLink } from "./primitives";
 import { useStatusMeta } from "./statusPalette";
 
@@ -54,6 +59,7 @@ function agoLabel(h: number) {
 
 export function ActionTrackerPanel() {
   const { role, decisions, routes, toast } = useHome();
+  const go = useCortexNav();
   const { meta } = useStatusMeta();
   const [scope, setScope] = useState<"mine" | "team">("mine");
   const [person, setPerson] = useState<string | null>(null);
@@ -123,7 +129,7 @@ export function ActionTrackerPanel() {
               Recent actions <span className="font-data text-cx-text">{rows.length}</span>
               <ChevronDown className={`h-3 w-3 transition-transform ${showRecent ? "rotate-180" : ""}`} />
             </button>
-            <TextLink onClick={() => toast("Opens the full Action Tracker.")}>View tracker</TextLink>
+            <TextLink onClick={() => go(role === "head" ? "tracker-head" : "tracker")}>View tracker</TextLink>
           </span>
         }
       />
@@ -310,25 +316,26 @@ const MONTH_STATUS: Record<PlanMonthStatus, { label: string; mark: ActionStatus 
   "not-started": { label: "Not created", mark: "unassigned" },
 };
 
-function MonthLabels() {
+function MonthLabels({ months = PLAN_MONTHS, active }: { months?: PlanMonth[]; active?: Set<string> }) {
   return (
-    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${PLAN_MONTHS.length}, minmax(0, 1fr))` }}>
-      {PLAN_MONTHS.map((m) =>
+    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${months.length}, minmax(0, 1fr))` }}>
+      {months.map((m) =>
         m.created ? (
-          <div key={m.month} className="px-0.5 py-2 text-center">
+          // months outside the selected period dim, so the filter shows on the timeline too
+          <div key={m.month} className={`px-0.5 py-2 text-center transition-opacity ${active && !active.has(m.month) ? "opacity-35" : ""}`}>
             <p className="text-[13px] text-cx-text">{m.month}</p>
-            <p className="mt-0.5 font-data text-[11px] text-cx-muted">
-              ₹{m.achievedL}/{m.estimateL}L
-            </p>
+            <p className="mt-0.5 font-data text-[11px] text-cx-muted">{m.achievedL == null ? `₹${m.estimateL}L target` : `₹${m.achievedL}/${m.estimateL}L`}</p>
             <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-cx-faint">
-              {m.status === "delivered" ? (
+              {m.achievedL == null ? (
+                <span className="hidden sm:inline">Saved · starts 1 Oct</span>
+              ) : m.status === "delivered" ? (
                 <span className="h-1.5 w-1.5 rounded-full" style={{ background: DELIVERED_BLUE }} aria-hidden />
               ) : (
                 <svg width="8" height="8" aria-hidden>
                   <StatusMark status={MONTH_STATUS[m.status].mark} x={4} y={4} r={3} />
                 </svg>
               )}
-              <span className="hidden sm:inline">{MONTH_STATUS[m.status].label}</span>
+              {m.achievedL != null && <span className="hidden sm:inline">{MONTH_STATUS[m.status].label}</span>}
             </p>
           </div>
         ) : (
@@ -382,10 +389,24 @@ function MonthTable() {
   );
 }
 
+/** The connected-node month timeline (Home's MAP card), shared with the Market Action Plans list. */
+export function PlanTimeline({ months, active }: { months: PlanMonth[]; active?: Set<string> }) {
+  return (
+    <>
+      <MapNodeTimeline months={months} deliveredColor={DELIVERED_BLUE} pendingColor="rgb(var(--cx-faint))" />
+      <div className="mt-2">
+        <MonthLabels months={months} active={active} />
+      </div>
+    </>
+  );
+}
+
 export function MapPanel() {
   const { role, decisions, routes, openPlan, toast } = useHome();
+  const go = useCortexNav();
   const escalated = RECOMMENDATIONS.filter((r) => decisions[r.id] === "escalated" || routes[r.id]?.includes("map"));
-  const sep = PLAN_MONTHS.find((m) => m.month === "Sep")!;
+  const sep = livePlanMonths(useLoop()).find((m) => m.month === "Sep")!;
+  const oct = useOctPlan();
   const ytd = Math.round((PLAN_META.ytdAchievedL / PLAN_META.ytdEstimateL) * 100);
   const [showTable, setShowTable] = useState(false);
 
@@ -394,7 +415,7 @@ export function MapPanel() {
       <PanelHeader
         agent="map"
         title="Market Action Plan"
-        right={<TextLink onClick={() => toast("Opens Market Action Plan.")}>Open plan</TextLink>}
+        right={<TextLink onClick={() => (role === "asm" ? (openSeptemberPlan(), go("map-plans")) : toast("Opens Market Action Plan."))}>Open plan</TextLink>}
       />
       <div className="px-5 pb-6 pt-5">
         <div className="grid grid-cols-3 gap-px overflow-hidden rounded-md border border-cx-line bg-cx-line">
@@ -434,7 +455,7 @@ export function MapPanel() {
 
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-cx-line pt-5">
           <div className="min-w-0">
-            <p className="text-[13px] text-cx-text">October plan not created yet</p>
+            <p className="text-[13px] text-cx-text">{oct?.saved ? `October plan saved ${oct.savedAt}` : "October plan not created yet"}</p>
             <p className="text-[12px] text-cx-faint">
               {escalated.length > 0
                 ? `${escalated.length} suggested initiative${escalated.length > 1 ? "s" : ""} escalated from Thermometer: ${escalated.map((r) => r.territory).join(", ")}`
@@ -442,9 +463,15 @@ export function MapPanel() {
             </p>
           </div>
           {role === "asm" ? (
-            <button onClick={openPlan} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#2f6fed] px-3 text-[12.5px] font-medium text-white hover:bg-[#4f86f7]">
-              <Plus className="h-3.5 w-3.5" /> Create October plan
-            </button>
+            oct?.saved ? (
+              <button onClick={() => (openOctoberPlan(), go("map-plans"))} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-cx-strong px-3 text-[12.5px] text-cx-text hover:bg-cx-hover">
+                Open October MAP
+              </button>
+            ) : (
+              <button onClick={openPlan} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#2f6fed] px-3 text-[12.5px] font-medium text-white hover:bg-[#4f86f7]">
+                <Plus className="h-3.5 w-3.5" /> Create October MAP
+              </button>
+            )
           ) : (
             <span className="flex items-center gap-1.5 text-[12px] text-cx-faint">
               <Lock className="h-3 w-3" /> {LBL.asmName} creates

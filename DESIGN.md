@@ -84,6 +84,25 @@ Two font families, switched by theme class:
 
 Weights: `400` (normal), `500` (medium), `600` (semibold) — no bold (700) in use.
 
+## Severity ramp — Priority Log tiers
+
+*Added 1 Oct 2026 (platform-wide corrections), so each tier reads at a glance on its bars and tab.* No new hex values: each tier reuses an existing status hue.
+
+| Tier | Colour | Source token |
+|---|---|---|
+| 1 · Critical | `#d64550` | Critical / Delayed (strong) |
+| 2 · High | `#e85a70` | Critical / Delayed (alt) |
+| 3 · Elevated | `#e0b43a` | Warning / Attention (alt) |
+| 4 · Standard | `#7c7f89` at 100% | Option B "No owner" grey |
+| 5 · Low | `#7c7f89` at 70% | same grey, lighter |
+| 6 · Watch | `#7c7f89` at 45% | same grey, lightest |
+
+Tiers 4–6 step down in one neutral grey rather than borrowing blue (In progress) or green (Completed), which mean something else in the same rows.
+
+## Studio mode
+
+*Added 1 Oct 2026.* MAP Studio and the ad hoc Pitch studio run full-screen. The standard top bar (wordmark and tabs) is replaced by a 48px strip that holds only the AI Assistant and the persona menu, at the far right. The agent rail stays. The page loses its 1440px max-width and side gutters, and panels sit 12px from the edges. No new tokens.
+
 ## Corner radius
 
 Not a single flat value — a small scale, used contextually:
@@ -109,7 +128,12 @@ Custom keyframes already defined and in use — reuse these rather than inventin
 - `cx-flash` — a brief highlight pulse on an element (1.6s), for drawing attention to something just updated
 - `cx-slide-in` — drawer/panel entrance (translateX, 0.28s)
 
-*Leadership additions (no new keyframes):* the live orchestration run reuses `cx-glow` on the active stage and fills its connectors with a plain CSS transform transition. The Configuration threshold slider is `.cx-range`, a transparent native range input whose thumb uses `--cx-text` / `--cx-panel` / `--cx-strong` and a primary-blue focus ring.
+*Leadership additions (the four-block live flow; no new keyframes):* the live orchestration run reuses `cx-glow` on the active stage and fills its connectors with a plain CSS transform transition. The Configuration threshold slider is `.cx-range`, a transparent native range input whose thumb uses `--cx-text` / `--cx-panel` / `--cx-strong` and a primary-blue focus ring.
+
+*Orchestration story additions (Head of Sales homepage, 1 Oct 2026 live-orchestration brief, which asks for demo/presentation weight):*
+- `cx-breathe` — the live stage's icon gently scales 1 → 1.1 and back (1.8s, ease-in-out, infinite). Only the one stage that is "on" uses it; it stops the moment that stage completes.
+- `cx-travel` — a single dot travels a connector once (0.7s, `cubic-bezier(0.22,1,0.36,1)`) to show hand-off to the next stage.
+- `.cx-glow-round` — modifier for `cx-glow` on a circular element: its inner fill takes `border-radius: 9999px` instead of the card's 7px.
 
 All animations respect `prefers-reduced-motion: reduce` and fall back to a static state — preserve this.
 

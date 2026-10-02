@@ -10,6 +10,7 @@ import { Check, CircleDot, CornerDownRight, GitBranch, Inbox, Scale, Workflow } 
 import { AGENTS } from "@/data/cortexHome";
 import { ActionTrace } from "@/data/actionTraces";
 import { useHome } from "./HomeState";
+import { linkPage, useCortexNav } from "./nav";
 import { AgentIcon } from "./primitives";
 
 const STEP_MS = 650;
@@ -164,7 +165,8 @@ function Step({ icon: Icon, title, state, last, children }: { icon: React.Compon
 
 /** The trace for one action. It plays through once when opened, then stays as a record. */
 export function ActionTraceSteps({ trace, heading = "How Sales AI routed this one action" }: { trace: ActionTrace; heading?: string }) {
-  const { toast } = useHome();
+  const { toast, role } = useHome();
+  const go = useCortexNav();
   const [step, setStep] = useState(0);
   const total = 4;
   useEffect(() => {
@@ -217,7 +219,15 @@ export function ActionTraceSteps({ trace, heading = "How Sales AI routed this on
           <p className="flex items-start gap-1.5 text-[12.5px] text-cx-text">
             <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: DONE }} /> {trace.outcome}
           </p>
-          <button onClick={() => toast(`Opens: ${trace.link.replace("View ", "")}.`)} className="mt-1 text-[12px] text-[#4f86f7] hover:underline">
+          <button
+            onClick={() => {
+              // MAP and Pitch are the ASM's pages; on the Head of Sales view these links stay previews
+              const to = linkPage(trace.link, role);
+              if (to) go(to);
+              else toast(`Opens: ${trace.link.replace("View ", "")}.`);
+            }}
+            className="mt-1 text-[12px] text-[#4f86f7] hover:underline"
+          >
             {trace.link} →
           </button>
         </Step>

@@ -294,7 +294,7 @@ rep("function showGaps(){", r"""/* ---------- notifications: backend inbox + pus
 const API=window.API_BASE,SO=B.sales_officer.id;
 function apiJ(p,o){return fetch(API+p,Object.assign({cache:'no-store',headers:{'Content-Type':'application/json'}},o||{}))
   .then(r=>r.json().catch(()=>{throw new Error('HTTP '+r.status)})).then(j=>{if(!j.success)throw new Error(j.error||'Request failed');return j.data})}
-Object.assign(NK,{new:'NEW ACTION ASSIGNED',due:'ACTION DUE TODAY',overdue:'ACTION OVERDUE',started:'ACTION STARTED',comment:'ACTION UPDATE',completed:'ACTION COMPLETED'});
+Object.assign(NK,{new:'NEW ACTION ASSIGNED',due:'ACTION DUE TODAY',overdue:'ACTION OVERDUE',started:'ACTION STARTED',comment:'ACTION UPDATE',completed:'ACTION COMPLETED',verified:'ACTION VERIFIED',sent_back:'ACTION SENT BACK'});
 const _notifLine=notifLine;
 notifLine=function(n,a){return n.k==='new'||!n.title?_notifLine(n,a):n.title};
 const linkVisit=a=>{if(!a.visitId&&a.retailer_id){const v=VISITS.find(v=>v.retailer_id===a.retailer_id&&v.state==='scheduled');if(v)a.visitId=v.id}};
@@ -305,7 +305,9 @@ let inboxSince=B.inbox_since||0,polling=false;
 async function pollInbox(){if(polling)return;polling=true;
   try{const d=await apiJ('/api/app/inbox?so='+encodeURIComponent(SO)+'&since='+inboxSince);
     inboxSince=d.since;Object.assign(U,d.users||{});
-    d.actions.forEach(a=>{linkVisit(a);if(!SRC.includes(a.src))SRC.push(a.src);const i=ACTS.findIndex(x=>x.id===a.id);if(i<0)ACTS.unshift(a);else if(ACTS[i].st==='owner')ACTS[i]=a});
+    d.actions.forEach(a=>{linkVisit(a);if(!SRC.includes(a.src))SRC.push(a.src);const i=ACTS.findIndex(x=>x.id===a.id);if(i<0)ACTS.unshift(a);else ACTS[i]=Object.assign(a,{visitId:a.visitId||ACTS[i].visitId})});
+    // the ASM verified or sent back one of the officer's own field actions on the web
+    (d.patches||[]).forEach(p=>{const a=byId(p.id);if(!a)return;a.st=p.st;p.acts.forEach(e=>{if(!a.acts.some(x=>x.ts===e.ts&&x.t===e.t))a.acts.push(e)})});
     const fresh=d.notifications.filter(n=>!NOTIFS.some(x=>x.id===n.id));
     fresh.forEach(n=>NOTIFS.unshift(n));
     if(fresh.length){const n=fresh[fresh.length-1],a=byId(n.aid);toast(fresh.length>1?fresh.length+' new notifications':n.title+(a?' · '+a.title:''));refreshAll()}

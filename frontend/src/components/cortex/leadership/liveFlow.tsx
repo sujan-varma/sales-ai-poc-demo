@@ -72,7 +72,9 @@ function useFlow() {
   return { done, current, phase, waiting: landed >= queue.length && !current };
 }
 
-export function LiveFlow() {
+/** The four-block flow. `embedded` drops its own card and header: it then sits behind
+ *  "Show details" in the orchestration story card (1 Oct 2026 brief). */
+export function LiveFlow({ embedded = false }: { embedded?: boolean }) {
   const go = useCortexNav();
   const { done, current, phase } = useFlow();
   const stage = phase.stage;
@@ -103,8 +105,7 @@ export function LiveFlow() {
     </span>
   );
 
-  return (
-    <section aria-labelledby="flow-title" className={`${card} p-5`}>
+  const header = (
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="flow-title" className="flex items-center gap-2.5 text-[15px] font-medium text-cx-text">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-cx-line bg-cx-raised">
@@ -120,8 +121,11 @@ export function LiveFlow() {
           Activity log <ChevronRight className="h-3 w-3" />
         </button>
       </div>
+  );
 
-      <div className="mt-4 grid grid-cols-1 items-stretch gap-2 md:grid-cols-[minmax(0,1.25fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)]">
+  const body = (
+    <>
+      <div className={`${embedded ? "" : "mt-4 "}grid grid-cols-1 items-stretch gap-2 md:grid-cols-[minmax(0,1.25fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)]`}>
         {/* 1 · Inputs: what has already happened, newest first */}
         <div className={`flex min-w-0 flex-col rounded-lg px-4 py-4 transition-colors ${glow(0)}`}>
           <div className="flex items-baseline justify-between gap-2">
@@ -239,6 +243,14 @@ export function LiveFlow() {
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${current ? "bg-ai" : "bg-cx-strong"}`} aria-hidden />
         <span className="truncate">{status}</span>
       </p>
+    </>
+  );
+
+  if (embedded) return body;
+  return (
+    <section aria-labelledby="flow-title" className={`${card} p-5`}>
+      {header}
+      {body}
     </section>
   );
 }

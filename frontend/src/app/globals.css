@@ -143,6 +143,45 @@ body:has(.cx-b[data-theme="light"]) {
   }
 }
 
+/* Head of Sales orchestration story (DESIGN.md: cx-breathe, cx-travel, cx-glow-round).
+   One stage is live at a time: its icon breathes inside a round cx-glow ring; on hand-off a
+   dot travels the connector once to the next stage. Demo-weight by design (1 Oct brief). */
+.cx-glow-round::after {
+  border-radius: 9999px;
+}
+.cx-breathe {
+  animation: cx-breathe 1.8s ease-in-out infinite;
+}
+@keyframes cx-breathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+}
+.cx-travel {
+  animation: cx-travel 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes cx-travel {
+  from {
+    left: 0%;
+    opacity: 1;
+  }
+  to {
+    left: 100%;
+    opacity: 0.2;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cx-breathe,
+  .cx-travel {
+    animation: none;
+  }
+}
+
 /* Option B KPI "View details": the opened card slides in from the left */
 .cx-slide-in {
   animation: cx-slide-in 0.28s ease-out;
