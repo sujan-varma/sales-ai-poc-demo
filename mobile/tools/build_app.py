@@ -257,6 +257,9 @@ renderCat();render();
   // same origin when served by the backend (/app or port 8000); otherwise port 8000 of the same host; ?api= overrides
   const API=(qs.get('api')||(location.port==='8000'||location.pathname.startsWith('/app')?location.origin:location.protocol+'//'+(location.hostname||'localhost')+':8000')).replace(/\\/$/,'');
   const so=qs.get('so');window.API_BASE=API;
+  // service worker messages (push arrived, notification tapped) before the app has started are kept for it
+  window.SW_Q=[];
+  if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('message',e=>{const m=e.data||{};window.onSwMsg?window.onSwMsg(m):window.SW_Q.push(m)});
   const box=document.getElementById('boot'),msg=document.getElementById('bootMsg'),err=document.getElementById('bootErr'),btn=document.getElementById('bootRetry');
   let started=false;
   async function load(){
@@ -301,17 +304,22 @@ const linkVisit=a=>{if(!a.visitId&&a.retailer_id){const v=VISITS.find(v=>v.retai
 ACTS.forEach(a=>{if(a.src&&!SRC.includes(a.src))SRC.push(a.src)});
 
 // new notifications (and the assigned actions they point to) while the app is open
-let inboxSince=B.inbox_since||0,polling=false;
-async function pollInbox(){if(polling)return;polling=true;
-  try{const d=await apiJ('/api/app/inbox?so='+encodeURIComponent(SO)+'&since='+inboxSince);
-    inboxSince=d.since;Object.assign(U,d.users||{});
-    d.actions.forEach(a=>{linkVisit(a);if(!SRC.includes(a.src))SRC.push(a.src);const i=ACTS.findIndex(x=>x.id===a.id);if(i<0)ACTS.unshift(a);else ACTS[i]=Object.assign(a,{visitId:a.visitId||ACTS[i].visitId})});
-    // the ASM verified or sent back one of the officer's own field actions on the web
-    (d.patches||[]).forEach(p=>{const a=byId(p.id);if(!a)return;a.st=p.st;p.acts.forEach(e=>{if(!a.acts.some(x=>x.ts===e.ts&&x.t===e.t))a.acts.push(e)})});
+let inboxSince=B.inbox_since||0,polling=null;
+const inboxQ=since=>apiJ('/api/app/inbox?so='+encodeURIComponent(SO)+'&since='+since);
+function mergeActions(d){Object.assign(U,d.users||{});
+  d.actions.forEach(a=>{linkVisit(a);if(!SRC.includes(a.src))SRC.push(a.src);const i=ACTS.findIndex(x=>x.id===a.id);if(i<0)ACTS.unshift(a);else ACTS[i]=Object.assign(a,{visitId:a.visitId||ACTS[i].visitId})});
+  // the ASM verified or sent back one of the officer's own field actions on the web
+  (d.patches||[]).forEach(p=>{const a=byId(p.id);if(!a)return;a.st=p.st;p.acts.forEach(e=>{if(!a.acts.some(x=>x.ts===e.ts&&x.t===e.t))a.acts.push(e)})})}
+// one request at a time; a caller that arrives meanwhile (a tap during the poll that coming back to the app starts) waits for it
+function pollInbox(){return polling||(polling=(async()=>{
+  try{const d=await inboxQ(inboxSince);
+    // the web's "Reset for demo" cleared the backend: start again from it rather than keep stale actions
+    if(d.epoch!=null&&d.epoch!==(B.tracker_epoch||0)){location.reload();return}
+    inboxSince=d.since;mergeActions(d);
     const fresh=d.notifications.filter(n=>!NOTIFS.some(x=>x.id===n.id));
     fresh.forEach(n=>NOTIFS.unshift(n));
     if(fresh.length){const n=fresh[fresh.length-1],a=byId(n.aid);toast(fresh.length>1?fresh.length+' new notifications':n.title+(a?' · '+a.title:''));refreshAll()}
-  }catch(e){}finally{polling=false}}
+  }catch(e){}})().finally(()=>{polling=null}))}
 
 // read state is kept by the backend, so the bell is the same after a reload
 const sentRead=new Set(NOTIFS.filter(n=>n.read).map(n=>n.id));
@@ -328,9 +336,13 @@ logA=function(a,t,txt){_logA(a,t,txt);
   if(!a.assigned)Object.assign(body,{retailer_id:a.retailer_id,signal:a.signal,title:a.title});
   apiJ('/api/tracker/actions/'+encodeURIComponent(a.id)+'/events',{method:'POST',body:JSON.stringify(body)}).catch(e=>toast('Not saved: '+e.message))};
 
-// open an action from a notification tap (service worker) or a #a=<id> link
-async function openFromPush(aid){if(!aid)return;if(!byId(aid))await pollInbox();if(!byId(aid))return;
-  NOTIFS.forEach(n=>{if(n.aid===aid)n.read=true});openAction(aid);sync()}
+// open an action from a notification tap (service worker) or a #a=<id> link. Not loaded yet: the new-notifications
+// poll brings it; failing that (its notification was polled before), every assigned action is fetched again.
+async function openFromPush(aid){if(!aid)return;
+  if(!byId(aid))await pollInbox();
+  if(!byId(aid))await inboxQ(0).then(mergeActions).catch(()=>{});
+  NOTIFS.forEach(n=>{if(n.aid===aid)n.read=true});
+  if(byId(aid))openAction(aid);else toast('This action is no longer available');sync()}
 
 // Web Push needs HTTPS (or localhost); on iPhone the app must be added to the Home Screen first
 const PUSH_OK='serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window&&window.isSecureContext;
@@ -366,11 +378,19 @@ function pushSettings(){
 
 function startNotifications(){
   setInterval(()=>{if(document.visibilityState==='visible')pollInbox()},20000);
-  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')pollInbox()});
-  if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('message',e=>{const m=e.data||{};
-    if(m.type==='push')pollInbox();else if(m.type==='open')openFromPush(m.aid)});
+  // a notification tapped while the app was in the background: the service worker also keeps it, and the app asks
+  // for it whenever it comes to the front, so a message a suspended page never got (iPhone) still opens the action
+  const swPost=m=>{const c='serviceWorker' in navigator&&navigator.serviceWorker.controller;if(c)c.postMessage(m)};
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){swPost({type:'pending?'});pollInbox()}});
+  // the loader listens from the start and keeps what arrived before the app was ready (a tap during loading)
+  let lastOpen={};
+  window.onSwMsg=m=>{if(m.type==='push')pollInbox();
+    else if(m.type==='open'){swPost({type:'opened'});if(lastOpen.aid===m.aid&&Date.now()-lastOpen.ts<5000)return;lastOpen={aid:m.aid,ts:Date.now()};openFromPush(m.aid)}};
+  window.SW_Q.splice(0).forEach(window.onSwMsg);
+  swPost({type:'pending?'});
   const m=location.hash.match(/^#a=(.+)$/);
-  if(m){history.replaceState(null,'',location.pathname+location.search);openFromPush(decodeURIComponent(m[1]))}
+  // (the service worker may also answer 'pending?' with this same tap: lastOpen keeps it from opening twice)
+  if(m){history.replaceState(null,'',location.pathname+location.search);lastOpen={aid:decodeURIComponent(m[1]),ts:Date.now()};openFromPush(lastOpen.aid)}
   if(PUSH_OK&&Notification.permission==='granted')enablePush(false);   // keep this phone's subscription current
   else if(PUSH_OK&&Notification.permission==='default'&&!lsGet('pushAsked')){lsSet('pushAsked','1');
     setTimeout(()=>sheetHTML(`<h4>Turn on notifications?</h4><p class="sp">Get a notification when your ASM assigns you an action, and when an assigned action is due or overdue.</p>
@@ -378,6 +398,21 @@ function startNotifications(){
 }
 function showGaps(){""")
 rep("renderCat();render();\n</script>\n<script>", "renderCat();render();\nstartNotifications();\n</script>\n<script>")
+
+# a notification whose action the app doesn't have (removed by a tracker reset, or not loaded yet) must not break the
+# bell: the panel used to throw while rendering it and not open at all. It shows the notification's own text instead,
+# in the same .nt row, and tapping it says the action is gone rather than throwing.
+rep("const a=byId(n.aid),[t1,t2]=splitT(a),[dt]=dueTxt(a);",
+    "const a=byId(n.aid);if(!a){const [b1,b2]=String(n.body||'').split(' · ');return`<button class=\"nt ${n.read?'':'un'}\" onclick=\"openNotif(${NOTIFS.indexOf(n)})\"><small>${NK[n.k]||'NOTIFICATION'}</small><time>${ago(n.ts)}</time><b>${esc(n.title||'Action update')}</b><span>${esc(b1||'')}</span><span>${esc(b2||'')}</span></button>`}const [t1,t2]=splitT(a),[dt]=dueTxt(a);",
+    count=2)
+# every action notification (due, overdue, update, sent back, verified — not only "new") carries the mockup's
+# priority · due line, so all bell rows look like the mockup's
+rep("${n.k==='new'?`<em>${a.pri} Priority · ${dt}</em>`:''}", "<em>${a.pri} Priority · ${dt}</em>", count=2)
+# the bell measured itself before .ntp (max-height:70%) applied, so with ~6+ notifications it was too tall to fit
+# below the bell and was placed above it, off the top of the screen: the bell "didn't open". Size it first.
+rep("  popAt(el,`<div class=\"nh\">", "  $('#pop').classList.add('ntp');popAt(el,`<div class=\"nh\">", count=2)
+rep("function openAction(id){const a=byId(id);if(a.to===role)",
+    "function openAction(id){const a=byId(id);if(!a){closeAll();toast('This action is no longer available');return}if(a.to===role)")
 
 OUT.parent.mkdir(parents=True, exist_ok=True)
 OUT.write_text(html, encoding="utf-8")

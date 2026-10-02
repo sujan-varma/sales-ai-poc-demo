@@ -84,6 +84,7 @@ On a list endpoint, `total` is the number of rows matching the search and filter
 | POST | `/api/tracker/actions/{id}/review` | – | `{ by, decision: verify\|send_back, note? }` from the web Tracker. For an officer's own field action add `so`, `retailer_id`, `signal`. Notifies the officer |
 | POST | `/api/tracker/actions/{id}/comment` | – | `{ by, text }` (same extra fields for a field action). The ASM's comment, shown in the officer's app |
 | POST | `/api/tracker/reminders/run` | API key | Sends due-today / overdue reminders for open assigned actions, once per action per day |
+| POST | `/api/tracker/reset?assigned_by=Raman` | – (API key without `assigned_by`) | The web's *Reset for demo*: clears that ASM's assigned actions and the notifications in the mobile app, so the Action Tracker items (*Suggested by Sales AI*, *Needs an owner*) can be assigned again. See [Reset for testing](#reset-for-testing) |
 | GET | `/api/web/bootstrap?asm=Raman` | – | Everything the Cortex web app (Next.js) shows, built from the workbook; `data.data_gaps` lists what's missing |
 | GET | `/api/web/data-gaps` | – | What the workbook can't provide to the web app |
 | GET | `/api/app/bootstrap?so=SO018` | – | Everything the mobile app shows for one sales officer (see below) |
@@ -180,6 +181,19 @@ The Excel workbook stays read-only. Assignments, status changes and notification
 5. **Remind.** `POST /api/tracker/reminders/run`, or `REMINDER_INTERVAL_MINUTES`, sends `due` / `overdue` reminders for open assigned actions, relative to `APP_TODAY`.
 
 `GET /api/app/bootstrap` merges all of this in, so a reload shows the same status, outcomes and read state.
+
+### Reset for testing
+
+An item assigned from the Home page's Action Tracker stays assigned (its Assign control is hidden) until the action is closed. **Reset for demo** (bottom of the web app's agent rail) starts over: it calls `POST /api/tracker/reset?assigned_by=<ASM>`, which removes the actions that ASM assigned, the officers' updates on that ASM's retailers, and the notifications and read state of the ASM and their officers. Then the web app reloads on the ASM Home. An open mobile app reloads itself on its next inbox check (within 20 s, or when it comes to the front).
+
+From a terminal, the same for one ASM, or everything (needs the key):
+
+```bash
+curl -X POST "http://localhost:8000/api/tracker/reset?assigned_by=Raman"
+curl -X POST -H "X-API-Key: $API_KEY" "http://localhost:8000/api/tracker/reset"
+```
+
+Ids keep counting up, so a new assignment never reuses an old id.
 
 ### Web Push (the mobile app)
 

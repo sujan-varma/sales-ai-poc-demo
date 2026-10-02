@@ -1,11 +1,11 @@
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Security
 
 from app.config import get_settings
 from app.routers.sales import _workbook
 from app.schemas import ActionEvent, ApiResponse, AsmCommentRequest, AssignRequest, ReviewRequest
-from app.security import require_api_key
+from app.security import api_key_header, require_api_key
 from app.services import tracker
 
 router = APIRouter(prefix="/api/tracker", tags=["action tracker"])
@@ -75,6 +75,28 @@ async def asm_comment(action_id: str, req: AsmCommentRequest):
     except tracker.TrackerError as e:
         raise HTTPException(e.status, str(e))
     return ApiResponse(data=data, total=1)
+
+
+@router.post(
+    "/reset",
+    response_model=ApiResponse[dict[str, int]],
+    summary="Reset for demo: clear assigned actions and notifications so the web's Action Tracker items can be assigned again",
+    description=(
+        "With `assigned_by` (the web's *Reset for demo*), that ASM's demo: the actions they assigned, the officers' "
+        "updates on their retailers, and the notifications and read state of the ASM and their officers. Like "
+        "`/assign`, it needs no key. Without `assigned_by`, everything, and it requires X-API-Key. Open mobile apps "
+        "reload on their next inbox check."
+    ),
+)
+def reset(assigned_by: Optional[str] = Query(None, description="ASM name, e.g. Raman"), key: Optional[str] = Security(api_key_header)):
+    wb = _workbook()
+    if assigned_by:
+        if assigned_by not in tracker._people(wb)["asms"]:
+            raise HTTPException(404, f"ASM '{assigned_by}' is not in 4. Retailer_Master")
+    else:
+        require_api_key(key)
+    data = tracker.reset(wb, assigned_by)
+    return ApiResponse(data=data, total=data["actions"])
 
 
 @router.post(

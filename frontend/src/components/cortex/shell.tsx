@@ -16,6 +16,8 @@ import { PulseStatusPalette } from "./statusPalette";
 import { ThemeRoot, ThemeToggle, useTheme } from "./theme";
 import { useCortexNav } from "./nav";
 import { AssignmentsProvider } from "./assignments";
+import { apiUrl } from "@/data/source";
+import { LBL } from "@/data/labels";
 import covasantWordmark from "@/assets/brand/covasant-wordmark.png";
 import covasantMark from "@/assets/brand/covasant-mark.png";
 
@@ -202,9 +204,23 @@ function TopNav({
   );
 }
 
-/** Reset for demo: everything added, saved or started in a walkthrough goes back to a clean start. */
-function resetDemo() {
-  if (!window.confirm("Reset the demo? Plans saved, pitches pushed, tickets closed and filters set in this walkthrough go back to the starting state.")) return;
+/** Reset for demo: everything added, saved or started in a walkthrough goes back to a clean start — including the
+ *  actions assigned to officers and the notifications in their mobile app, which the backend keeps. */
+async function resetDemo() {
+  if (
+    !window.confirm(
+      "Reset the demo? Plans saved, pitches pushed, tickets closed and filters set in this walkthrough go back to the starting state. Actions assigned from the Action Tracker and their notifications in the mobile app are cleared, so the items can be assigned again.",
+    )
+  )
+    return;
+  try {
+    const r = await fetch(`${apiUrl()}/api/tracker/reset?assigned_by=${encodeURIComponent(LBL.asmName)}`, { method: "POST", cache: "no-store" });
+    const j = (await r.json().catch(() => ({}))) as { success?: boolean; error?: string };
+    if (!j.success) throw new Error(j.error || `HTTP ${r.status}`);
+  } catch (e) {
+    // the rest of the reset still happens; say what didn't, so a stale assignment isn't a surprise
+    window.alert(`Assigned actions and notifications couldn't be reset: ${(e as Error).message}`);
+  }
   try {
     const keys: string[] = [];
     for (let i = 0; i < sessionStorage.length; i++) {

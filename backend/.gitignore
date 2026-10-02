@@ -8,3 +8,4 @@ data/tracker.json
 data/vapid.pem
 server.log
 server.err.log
+data/tracker.backup-*.json
