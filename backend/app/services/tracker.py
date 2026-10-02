@@ -327,6 +327,86 @@ async def apply_event(wb: Workbook, action_id: str, ev: dict[str, Any]) -> dict[
     return {"id": action_id, "st": st, "notified": asm_user(asm)}
 
 
+# ---------------------------------------------------------------- the ASM's side: verify, send back, comment
+
+def _find_target(state: dict[str, Any], wb: Workbook, action_id: str, body: dict[str, Any], create: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(record, officer) for a stored action, or for an officer's field action (an override keyed by retailer)."""
+    a = next((x for x in state["actions"] if x["id"] == action_id), None)
+    if a:
+        if a["assignee"]["type"] != "so":
+            raise TrackerError(409, f"{action_id} is the ASM's own action; there is no officer to verify")
+        o = find_officer(wb, a["assignee"]["id"])
+        if a["assigned_by"]["name"] != body["by"] and (not o or o["asm"] != body["by"]):
+            raise TrackerError(403, f"{action_id} was assigned by {a['assigned_by']['name']}")
+        return a, o
+    o = find_officer(wb, body.get("so") or "")
+    rid = body.get("retailer_id")
+    if not o or not rid:
+        raise TrackerError(404, f"Action {action_id} not found; for an officer's field action pass so and retailer_id")
+    r = _people(wb)["retailers"].get(str(rid))
+    if r is None or str(r["Sales officer ID"]) != o["id"]:
+        raise TrackerError(404, f"Retailer '{rid}' is not served by {o['id']}")
+    if r["ASM Name"] != body["by"]:
+        raise TrackerError(403, f"Retailer '{rid}' is under ASM {r['ASM Name']}, not {body['by']}")
+    sig = body.get("signal")
+    key = next((k for k, v in state["overrides"].items()
+                if k.startswith(f"{o['id']}|") and v.get("retailer_id") == r["retailer_id"] and v.get("signal") in (None, sig)), None)
+    if key is None:
+        if not create:
+            raise TrackerError(404, f"{o['name']} has not updated this action yet")
+        # keyed by the app's own id for this retailer + signal, so the officer's app finds it
+        mid, title = _app_action_id(wb, o["id"], r["retailer_id"], sig)
+        key = f"{o['id']}|{mid or action_id}"
+        state["overrides"][key] = {"retailer_id": r["retailer_id"], "signal": sig, "title": title or body.get("title"), "outlet": r["retailer_name"], "st": "owner", "acts": []}
+    return state["overrides"][key], o
+
+
+def _app_action_id(wb: Workbook, so_id: str, retailer_id: str, signal: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """The id (and title) the officer's app gives the action for this retailer and signal."""
+    try:
+        data = field_app.build_bootstrap(wb, so_id, get_settings().app_today)
+    except field_app.NotFound:
+        return None, None
+    a = next((a for a in data["actions"] if a.get("retailer_id") == retailer_id and (signal is None or a.get("signal") == signal)), None)
+    return (a["id"], a["title"]) if a else (None, None)
+
+
+def _app_id(state: dict[str, Any], t: dict[str, Any], so_id: str, fallback: str) -> str:
+    """The id the officer's app knows a record by: a stored action's own id, or an override's key suffix."""
+    if "id" in t:
+        return t["id"]
+    key = next((k for k, v in state["overrides"].items() if v is t), None)
+    return key.split("|", 1)[1] if key and key.startswith(f"{so_id}|") else fallback
+
+
+async def review(wb: Workbook, action_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """The ASM verifies (closes) or sends back an action the officer marked done; the officer is notified."""
+    now = _ms()
+    verify = body["decision"] == "verify"
+    with get_store().edit() as state:
+        t, o = _find_target(state, wb, action_id, body, create=verify)
+        t["st"], t["verified"] = ("closed", True) if verify else ("progress", False)
+        t["acts"].append({"by": body["by"], "role": "asm", "t": "verified" if verify else "sent_back", "ts": now, "txt": body.get("note") or None})
+        what = f"{t.get('title') or action_id}" + (f" · {t['outlet']}" if t.get("outlet") else "")
+        n = _notify(state, o["id"], "verified" if verify else "sent_back",
+                    f"{body['by']} verified and closed your action" if verify else f"{body['by']} sent an action back to you",
+                    what + (f" — {body['note']}" if body.get("note") else ""), {"id": _app_id(state, t, o["id"], action_id)}, {"so": o["id"], "status": t["st"]})
+        st = t["st"]
+    await _deliver([n])
+    return {"id": action_id, "st": st, "verified": verify, "notified": o["id"]}
+
+
+async def asm_comment(wb: Workbook, action_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    now = _ms()
+    with get_store().edit() as state:
+        t, o = _find_target(state, wb, action_id, body, create=True)
+        t["acts"].append({"by": body["by"], "role": "asm", "t": "comment", "ts": now, "txt": body["text"]})
+        n = _notify(state, o["id"], "comment", f"{body['by']} commented on an action", f"{t.get('title') or action_id} — {body['text']}",
+                    {"id": _app_id(state, t, o["id"], action_id)}, {"so": o["id"], "status": t["st"]})
+    await _deliver([n])
+    return {"id": action_id, "notified": o["id"]}
+
+
 # ---------------------------------------------------------------- reminders
 
 async def run_reminders(today: dt.date) -> list[dict[str, Any]]:
@@ -354,6 +434,15 @@ async def run_reminders(today: dt.date) -> list[dict[str, Any]]:
 APP_KIND_OF_NOTIF = {"assigned": "new"}
 
 
+def _app_act(users: dict[str, Any], e: dict[str, Any]) -> dict[str, Any]:
+    """One activity entry in the app's shape; the ASM's verify / send back read as updates there."""
+    t, txt = e["t"], e.get("txt")
+    if t in ("verified", "sent_back"):
+        txt = ("Verified and closed" if t == "verified" else "Sent back") + (f": {txt}" if txt else "")
+        t = "comment"
+    return {"a": _user_key(users, e["by"], e["role"]), "t": t, "ts": e["ts"], **({"txt": txt} if txt else {})}
+
+
 def _user_key(users: dict[str, Any], name: str, role: str) -> str:
     for k, u in users.items():
         if u.get("n") == name and (role != "so" or u.get("r") == "Sales Officer"):
@@ -364,7 +453,7 @@ def _user_key(users: dict[str, Any], name: str, role: str) -> str:
 
 
 def app_action(a: dict[str, Any], users: dict[str, Any], today: dt.date, visits: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
-    acts = [{"a": _user_key(users, e["by"], e["role"]), "t": e["t"], "ts": e["ts"], **({"txt": e["txt"]} if e.get("txt") else {})} for e in a["acts"]]
+    acts = [_app_act(users, e) for e in a["acts"]]
     out = {
         "id": a["id"], "tk": a["id"], "title": a["title"], "outlet": a["outlet"], "retailer_id": a["retailer_id"],
         "terr": a["territory"], "src": a["src"], "pri": a["pri"], "due": (dt.date.fromisoformat(a["due_date"]) - today).days,
@@ -397,7 +486,7 @@ def merge_into_bootstrap(data: dict[str, Any], today: dt.date) -> dict[str, Any]
         ov = state["overrides"].get(f"{so}|{a['id']}")
         if ov and ov["retailer_id"] == a["retailer_id"] and ov.get("signal") in (None, a.get("signal")):
             a["st"] = ov["st"]
-            a["acts"] = a["acts"] + [{"a": _user_key(users, e["by"], e["role"]), "t": e["t"], "ts": e["ts"], **({"txt": e["txt"]} if e.get("txt") else {})} for e in ov["acts"]]
+            a["acts"] = a["acts"] + [_app_act(users, e) for e in ov["acts"]]
             if ov.get("outcome"):
                 a["outcome"] = ov["outcome"]
             if a["st"] == "closed" and a.get("steps"):
@@ -430,7 +519,13 @@ def app_inbox(wb: Workbook, so: str, since: int, today: dt.date) -> dict[str, An
     new = sorted((n for n in state["notifications"] if push.same_user(n["to"], o["id"]) and n["ts"] > since), key=lambda n: n["ts"])
     aids = {n["aid"] for n in new}
     actions = [app_action(a, users, today) for a in state["actions"] if a["id"] in aids and a["assignee"].get("id") == o["id"]]
-    return {"notifications": [app_notification(n) for n in new], "actions": actions,
+    stored_ids = {a["id"] for a in state["actions"]}
+    patches = []
+    for n in new:
+        ov = state["overrides"].get(f"{o['id']}|{n['aid']}") if n["aid"] and n["aid"] not in stored_ids else None
+        if ov:
+            patches.append({"id": n["aid"], "st": ov["st"], "acts": [_app_act(users, e) for e in ov["acts"] if e["role"] == "asm"]})
+    return {"notifications": [app_notification(n) for n in new], "actions": actions, "patches": patches,
             "users": {k: v for k, v in users.items() if k not in base},
             "unread": sum(1 for n in state["notifications"] if push.same_user(n["to"], o["id"]) and not n["read"]),
             "since": max([since] + [n["ts"] for n in new])}

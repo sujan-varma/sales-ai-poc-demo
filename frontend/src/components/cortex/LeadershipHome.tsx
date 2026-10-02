@@ -19,7 +19,7 @@ import { useCortexNav } from "./nav";
 import { TerritoryHealthCard } from "./territoryHealth";
 import { DateFilter, LeadershipProvider, useHeadNav } from "./leadership/common";
 import { LeadershipKpis } from "./leadership/kpis";
-import { LiveFlow } from "./leadership/liveFlow";
+import { OrchestrationStory } from "./leadership/orchestration";
 import { DecisionsTable } from "./leadership/decisions";
 import { PriorityTop } from "./leadership/logs";
 import { ImpactMetrics } from "./leadership/impact";
@@ -49,7 +49,7 @@ function Leadership() {
         <LeadershipHero />
         <div className="cx-stagger space-y-8 px-4 sm:px-6">
           <LeadershipKpis />
-          <LiveFlow />
+          <OrchestrationStory />
           <DecisionsTable />
           <div className="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-2">
             <ThermoScorecard compact />

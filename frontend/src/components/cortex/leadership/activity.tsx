@@ -311,10 +311,11 @@ export function LiveTimeline() {
 
 const AGENT_NAMES = (Object.keys(AGENTS) as AgentId[]).map((a) => AGENTS[a].name);
 
-export function ActivityLogTable() {
+export function ActivityLogTable({ fixedRegion, scopeLabel }: { fixedRegion?: string; scopeLabel?: string } = {}) {
   const range = useRange();
   const [agent, setAgent] = useState<string | null>(null);
-  const [region, setRegion] = useState<string | null>(null);
+  const [regionPick, setRegion] = useState<string | null>(null);
+  const region = fixedRegion ?? regionPick;
   const [trigger, setTrigger] = useState<string | null>(null);
   const days = range.id === "today" ? ACTIVITY_DAYS.slice(0, 1) : ACTIVITY_DAYS;
 
@@ -329,7 +330,7 @@ export function ActivityLogTable() {
       ),
     [days, agent, region, trigger]
   );
-  const anyFilter = agent || region || trigger;
+  const anyFilter = agent || regionPick || trigger;
   const th = "px-3 py-2.5 text-left text-[11px] font-normal text-cx-faint";
   const td = "px-3 py-3 align-top";
 
@@ -340,13 +341,13 @@ export function ActivityLogTable() {
           <h2 id="alog-title" className="flex flex-wrap items-baseline gap-x-2.5 text-[15px] font-medium text-cx-text">
             Every entry
             <span className="text-[11.5px] font-normal text-cx-faint">
-              <span className="font-data text-cx-muted">{rows.length}</span> entries · <span className="font-data text-cx-muted">{rows.reduce((n, e) => n + entryActions(e), 0)}</span> routed · {range.id === "today" ? "today" : "last 7 days"}
+              <span className="font-data text-cx-muted">{rows.length}</span> entries · <span className="font-data text-cx-muted">{rows.reduce((n, e) => n + entryActions(e), 0)}</span> routed · {scopeLabel ?? (range.id === "today" ? "today" : `${range.label} · the log keeps the last 7 days`)}
             </span>
           </h2>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Dropdown label="Agent" value={agent} options={AGENT_NAMES} onChange={setAgent} />
-          <Dropdown label="Region" value={region} options={REGIONS.map((r) => r.name)} onChange={setRegion} />
+          {!fixedRegion && <Dropdown label="Region" value={region} options={REGIONS.map((r) => r.name)} onChange={setRegion} />}
           <Dropdown label="Trigger" value={trigger} options={Object.values(TRIGGER_LABEL)} onChange={setTrigger} />
           {anyFilter && (
             <button

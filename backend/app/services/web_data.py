@@ -17,6 +17,7 @@ import re
 from collections import Counter, defaultdict
 from typing import Any, Optional
 
+from app.services import web_plan
 from app.services.excel_data import Workbook
 
 MASTER, GEO, PRODUCTS, CREDIT = "4. Retailer_Master", "1. Geography", "2. Products", "5. Retailer Credit"
@@ -909,7 +910,10 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
     LEVERS = thermo_levers(org, cps, tiers)
     BDES = thermo_bdes(org)
 
+    plan = web_plan.build(wb, org, {"A": A, "sig_rows": sig_rows, "recs": recs, "rec_route": REC_SUGGESTED})
+
     return {
+        "map": plan["map"], "pitch": plan["pitch"], "tracker": plan["tracker"],
         "cortexHome": {
             "AGENT_STATS": AGENT_STATS, "VIEWER": VIEWER,
             "TODAY_LABEL": f"{WD[TODAY.weekday()]}, {TODAY.day} September {TODAY.year}", "SYNC_LABEL": "Excel data as of 20 Sep 2026",
@@ -940,6 +944,7 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
             "IMPACT_ROWS": IMPACT_ROWS, "IMPACT_CONFIDENCE": IMPACT_CONFIDENCE, "LEAD_INSIGHTS_SUMMARY": LEAD_SUMMARY, "LEAD_INSIGHTS": LEAD_INSIGHTS,
             "PLAN_REVIEWS": PLAN_REVIEWS, "SCORECARD": SCORECARD, "THRESHOLD_PENDING": pending,
             "CONFIG_WHO": org.rsm,
+            **plan["story"],
         },
         "thermometer": {
             "AS_OF": {"day": AS_OF.day, "days": MONTH_DAYS, "label": "20 Sep 2026"}, "SYNC_NOTE": "From the Excel workbook · data to 20 Sep 2026",
@@ -947,7 +952,7 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
             "ASM_NAME": A,
         },
         "actionTraces": {"REC_SUGGESTED": REC_SUGGESTED, "ACTION_TRACES": ACTION_TRACES},
-        "data_gaps": DATA_GAPS,
+        "data_gaps": DATA_GAPS + web_plan.PLAN_GAPS,
     }
 
 

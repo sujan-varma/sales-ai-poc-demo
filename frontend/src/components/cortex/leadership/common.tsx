@@ -260,7 +260,7 @@ export function useHeadNav(current: "home" | "logs" | "none") {
     onTab: (i: number) => {
       if (i === 0) go("leadership");
       else if (i === 2) go("priority-log");
-      else toast("Opens the Action Tracker.");
+      else go("tracker-head");
       return true;
     },
   };

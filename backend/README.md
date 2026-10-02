@@ -81,6 +81,8 @@ On a list endpoint, `total` is the number of rows matching the search and filter
 | POST | `/api/tracker/assign` | – | Assigns an action to a sales officer (or `Me`, the ASM) and notifies them. See [Action notifications](#action-notifications) |
 | GET | `/api/tracker/actions?assigned_by=Raman` | – | Assigned actions and their status. Also `?so=SO018` |
 | POST | `/api/tracker/actions/{id}/events` | – | `{ so, type: started\|comment\|complete, text?, outcome? }` from the app; notifies the ASM |
+| POST | `/api/tracker/actions/{id}/review` | – | `{ by, decision: verify\|send_back, note? }` from the web Tracker. For an officer's own field action add `so`, `retailer_id`, `signal`. Notifies the officer |
+| POST | `/api/tracker/actions/{id}/comment` | – | `{ by, text }` (same extra fields for a field action). The ASM's comment, shown in the officer's app |
 | POST | `/api/tracker/reminders/run` | API key | Sends due-today / overdue reminders for open assigned actions, once per action per day |
 | GET | `/api/web/bootstrap?asm=Raman` | – | Everything the Cortex web app (Next.js) shows, built from the workbook; `data.data_gaps` lists what's missing |
 | GET | `/api/web/data-gaps` | – | What the workbook can't provide to the web app |
@@ -118,6 +120,18 @@ The summary is built from four sheets: `4. Retailer_Master` (ASM, territory and 
 
 Money is in rupees and isn't rounded. The data runs to **20 Sep 2026**.
 
+## Market Action Plan, Pitch and Tracker data (`map`, `pitch`, `tracker` in `/api/web/bootstrap`)
+
+Built by `app/services/web_plan.py` for the ASM, from the workbook:
+
+| Screen | From |
+|---|---|
+| Plan initiatives | Distributor revival (`MAP_Distributor Assessment`, Jun→Aug de-growth; delivered = Sep MTD above Aug MTD), retail reach (distributors under 70% of their retailer universe mapped; delivered = new retailers billing in Sep), range selling (each territory's largest category gap; delivered = Sep MTD actual), dormant retailers (Q1 sales, none in Jul–Aug), influencer activation (`Data 12`). Agreed = Estimated: there are no ASM targets. |
+| October draft | What September leaves open, plus each territory's retailers not visited in 30+ days |
+| Market sheets | `Data 11` shares for the ASM's micro market; ₹ size = company Apr–Aug run-rate ÷ share; territories split it by their distributors' retailer universe. Reach and influencers straight from the sheets |
+| Pitch | One pitch per outlet the plan reaches; KPIs and talking points from the outlet's own rows (tenure, credit, SKU gap in `11. Sep projections`, loyalty pitch statement, short supply). Visited = last SO visit on or after 1 Sep |
+| Tracker | The ASM's signal groups (Needs an owner) and the officers' retailer actions (Team), plus — per request, from `tracker.json` — assignments, the officers' updates and completions, and verifications |
+
 ## Mobile app data (`/api/app/bootstrap`)
 
 Every screen's data for one sales officer comes from the Excel workbook. `?so=` takes an ID or a name and defaults to `DEFAULT_SALES_OFFICER` (`SO018`). `?today=` defaults to `APP_TODAY` (`2026-09-21`, the day after the workbook's actuals end).
@@ -149,8 +163,9 @@ The Excel workbook stays read-only. Assignments, status changes and notification
 
 1. **Assign (web app).** *Assign & Add to Tracker* and *Needs an owner → Assign* call `POST /api/tracker/assign`. The backend checks the ASM, the officer (they must serve retailers under that ASM), the territory and the retailer against `4. Retailer_Master`. It fills the action from the retailer's workbook signal, the same rule the mobile app uses, so both apps describe it the same way (for example "Collect ₹13.41L overdue for 73 days…"). Assigning the same item to the same person again returns the existing action.
 2. **Notify (mobile app).** The officer gets an `assigned` notification. It's pushed to every device they registered, and it appears in the app's bell, which polls `GET /api/app/inbox` every 20 s while open. Tapping the push opens the action.
-3. **Work it (mobile app).** Start, update and complete in the app call `POST /api/tracker/actions/{id}/events`. This also works for the actions the app derives from the workbook (stored as overrides). The ASM gets `started` / `comment` / `completed` notifications in `asm:<name>`'s inbox.
-4. **Remind.** `POST /api/tracker/reminders/run`, or `REMINDER_INTERVAL_MINUTES`, sends `due` / `overdue` reminders for open assigned actions, relative to `APP_TODAY`.
+3. **Verify (web Tracker).** What the officer marks done shows in *Awaiting Verification*. *Verify and close* or *Send back* calls `POST /api/tracker/actions/{id}/review`; send back reopens it in the officer's app with a push. The ASM's comments go through `/comment`. Plan rows (*Send to Tracker*, *Comment*) and MAP Studio's *Save* create assignments with `/assign`.
+4. **Work it (mobile app).** Start, update and complete in the app call `POST /api/tracker/actions/{id}/events`. This also works for the actions the app derives from the workbook (stored as overrides). The ASM gets `started` / `comment` / `completed` notifications in `asm:<name>`'s inbox.
+5. **Remind.** `POST /api/tracker/reminders/run`, or `REMINDER_INTERVAL_MINUTES`, sends `due` / `overdue` reminders for open assigned actions, relative to `APP_TODAY`.
 
 `GET /api/app/bootstrap` merges all of this in, so a reload shows the same status, outcomes and read state.
 

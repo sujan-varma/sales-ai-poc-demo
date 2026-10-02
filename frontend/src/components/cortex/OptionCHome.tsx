@@ -77,6 +77,11 @@ import { AgentIcon, CortexMark, StatusBadge } from "./primitives";
 import { CortexPageRoot, PageFrame, Persona, useOutside } from "./shell";
 import { assignToast, assignmentLine, useAssignments } from "./assignments";
 import { useCortexNav } from "./nav";
+import { useAsmNav } from "./asmNav";
+import { PeriodFilter, periodDetail, periodLabel, periodMonths, usePeriod } from "./period";
+import { useOctPlan } from "./map/octPlan";
+import { openOctoberPlan } from "./map/MapPlansPage";
+import { closedInsights, livePlanMonths, useLoop } from "./tracker/loop";
 import { SuggestedOutcome } from "./actionTrace";
 import { ACTION_TRACES, REC_SUGGESTED, ROUTE_DONE_LABEL } from "@/data/actionTraces";
 import { CardHeader, Dropdown, Eyebrow, KpiStripes, blueRamp, card } from "./kit";
@@ -209,6 +214,9 @@ function MonthTimeline({ months, closedColor }: { months: PlanMonth[]; closedCol
 
 function Hero({ persona }: { persona: "asm" | "head" }) {
   const { openPlan } = useHome();
+  const go = useCortexNav();
+  const oct = useOctPlan();
+  const [period] = usePeriod();
   const v = VIEWER[persona];
   const [first] = v.greeting.replace("Good morning, ", "").split(" ");
   // Smaller and higher: the name is the same every day; the KPI cards below matter more.
@@ -220,15 +228,21 @@ function Hero({ persona }: { persona: "asm" | "head" }) {
             Welcome back, <span className="text-[#4f86f7]">{first}</span>
           </h1>
           <p className="mt-1 text-[12px] text-cx-faint">
-            {v.role.replace(" · read-only", "")} · {v.scope} · {TODAY_LABEL} · <span className="font-data">{SYNC_LABEL}</span>
+            {v.role.replace(" · read-only", "")} · {v.scope} · {persona === "asm" ? `Showing ${periodDetail(period)}` : TODAY_LABEL} · <span className="font-data">{SYNC_LABEL}</span>
           </p>
         </div>
         {persona === "asm" ? (
           <div className="flex flex-col items-end gap-1">
-            <button onClick={openPlan} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#2f6fed] px-4 text-[13px] font-medium text-white hover:bg-[#4f86f7]">
-              <Plus className="h-4 w-4" /> Create Market Action Plan
-            </button>
-            <span className="text-[12px] text-cx-faint">October not created · September closes and lands 1 October 2026</span>
+            {oct?.saved ? (
+              <button onClick={() => (openOctoberPlan(), go("map-plans"))} className="inline-flex h-9 items-center gap-2 rounded-lg border border-cx-strong bg-cx-panel px-4 text-[13px] font-medium text-cx-text hover:bg-cx-hover">
+                Open October MAP
+              </button>
+            ) : (
+              <button onClick={openPlan} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#2f6fed] px-4 text-[13px] font-medium text-white hover:bg-[#4f86f7]">
+                <Plus className="h-4 w-4" /> Create October MAP
+              </button>
+            )}
+            <span className="text-[12px] text-cx-faint">{oct?.saved ? `October saved ${oct.savedAt} · starts 1 October 2026` : "October not created · September closes and lands 1 October 2026"}</span>
           </div>
         ) : (
           <span className="inline-flex h-9 items-center gap-2 rounded-lg border border-cx-line bg-cx-panel/70 px-4 text-[13px] text-cx-faint">
@@ -247,14 +261,46 @@ function Hero({ persona }: { persona: "asm" | "head" }) {
 
 type KpiId = "achieved" | "actions" | "weakest";
 
+/** ASM action totals for a period: actions opened and completed in its plan months; what's still open keeps September's split. */
+function trackerForPeriod(pm: { month: string; share: number }[]) {
+  const sepT = TRACKER.asm;
+  let total = 0, done = 0;
+  for (const { month, share } of pm) {
+    const m = ACTION_MONTHS.asm.find((x) => x.month === month);
+    if (m) {
+      total += m.opened * share;
+      done += m.completed * share;
+    }
+  }
+  total = Math.max(1, Math.round(total));
+  done = Math.min(total, Math.round(done));
+  const open = total - done;
+  const sepOpen = sepT.total - sepT.counts.done;
+  const withSep = pm.some((m) => m.month === "Sep");
+  const progress = withSep ? Math.round((open * sepT.counts.progress) / sepOpen) : 0;
+  const unassigned = withSep ? Math.round((open * sepT.counts.unassigned) / sepOpen) : 0;
+  return { ...sepT, total, counts: { done, progress, unassigned, delayed: Math.max(0, open - progress - unassigned) } };
+}
+
 const KPI_H = 158; // one collapsed KPI cell; the expanded view is exactly two cells + the divider
 
 function KpiCard({ id, persona, expanded, onToggle }: { id: KpiId; persona: "asm" | "head"; expanded: boolean; onToggle: () => void }) {
   const { meta } = useStatusMeta();
   const [hoverDim, setHoverDim] = useState<number | null>(null);
-  const plan = persona === "asm" ? PLAN_MONTHS : HEAD_PLAN_MONTHS;
+  const loop = useLoop();
+  const [period] = usePeriod();
+  const plan = persona === "asm" ? livePlanMonths(loop) : HEAD_PLAN_MONTHS;
   const sep = plan.find((m) => m.month === "Sep")!;
-  const t = TRACKER[persona];
+  // ASM: the period filter reconfigures the figures (plan months, and the actions opened in them)
+  const pm = periodMonths(period);
+  const single = persona === "asm" && period.kind === "month";
+  const span = pm.map(({ month, share }) => {
+    const m = plan.find((x) => x.month === month)!;
+    return { est: (m.estimateL ?? 0) * share, ach: (m.achievedL ?? 0) * share };
+  });
+  const perEst = span.reduce((n, x) => n + x.est, 0);
+  const perAch = span.reduce((n, x) => n + x.ach, 0);
+  const t = persona === "asm" && !single ? trackerForPeriod(pm) : TRACKER[persona];
   const w = weakest(persona);
   const inr = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 1 });
   const sub = "mt-1 truncate text-[11.5px] leading-[16px] text-cx-faint";
@@ -312,31 +358,33 @@ function KpiCard({ id, persona, expanded, onToggle }: { id: KpiId; persona: "asm
       </>
     );
   } else if (id === "achieved") {
-    const p = pct(sep)!;
-    const projected = Number(sep.note.match(/~(\d+)%/)?.[1] ?? 0);
+    const p = single ? pct(sep)! : Math.round((perAch / Math.max(perEst, 1)) * 100);
+    const projected = single ? Number(sep.note.match(/~(\d+)%/)?.[1] ?? 0) : 0;
     const filled = Math.round(p / 5);
     const ramp = blueRamp(filled);
     body = (
       <>
         {head(
           <>
-            <span className="truncate text-[12.5px] text-cx-muted">Achieved target · Sep 2026</span>
-            <span className="rounded border border-cx-strong px-1.5 text-[10.5px] text-cx-text">This month</span>
+            <span className="truncate text-[12.5px] text-cx-muted">Achieved target · {single ? "Sep 2026" : periodDetail(period).split(" · ").pop()}</span>
+            <span className="rounded border border-cx-strong px-1.5 text-[10.5px] text-cx-text">{single ? "This month" : periodLabel(period)}</span>
           </>
         )}
-        {value(<span className="font-data text-[28px] leading-none text-cx-text">₹{inr(sep.achievedL!)}L</span>, <span className="font-data text-[20px] leading-none text-cx-text">{p}%</span>)}
-        <p className={sub}>of ₹{inr(sep.estimateL!)}L estimated · {LBL.daysLeft} · projected ~{projected}%</p>
+        {value(<span className="font-data text-[28px] leading-none text-cx-text">₹{inr(single ? sep.achievedL! : Math.round(perAch * 10) / 10)}L</span>, <span className="font-data text-[20px] leading-none text-cx-text">{p}%</span>)}
+        <p className={sub}>
+          {single ? `of ₹${inr(sep.estimateL!)}L estimated · ${LBL.daysLeft} · projected ~${projected}%` : `of ₹${inr(Math.round(perEst * 10) / 10)}L estimated · ${pm.length} plan month${pm.length === 1 ? "" : "s"}${pm.some((m) => m.month === "Sep") ? " · September still open" : ""}`}
+        </p>
         <div className="mt-auto">
           <KpiStripes
             fills={Array.from({ length: 20 }, (_, i) => (i < filled ? ramp(i) : null))}
-            projected={Math.round(projected / 5) - 1}
+            projected={projected ? Math.round(projected / 5) - 1 : undefined}
             tip={(i) => [
-              i === Math.round(projected / 5) - 1
+              projected && i === Math.round(projected / 5) - 1
                 ? `Projected finish · ~${projected}% of estimate`
                 : i < filled
                   ? `Achieved · ${i * 5}–${(i + 1) * 5}% of estimate`
                   : `Not yet reached · ${i * 5}–${(i + 1) * 5}%`,
-              `Each stripe = 5% · dashed line = 100% of ₹${inr(sep.estimateL!)}L`,
+              `Each stripe = 5% · dashed line = 100% of ₹${inr(single ? sep.estimateL! : Math.round(perEst * 10) / 10)}L`,
             ]}
           />
         </div>
@@ -352,10 +400,10 @@ function KpiCard({ id, persona, expanded, onToggle }: { id: KpiId; persona: "asm
     );
     body = (
       <>
-        {head(<span className="truncate text-[12.5px] text-cx-muted">Open action items · September</span>)}
+        {head(<span className="truncate text-[12.5px] text-cx-muted">Open action items · {persona === "asm" && !single ? periodLabel(period) : "September"}</span>)}
         {value(<span className="font-data text-[28px] leading-none text-cx-text">{open}</span>, <span className="font-data text-[20px] leading-none text-cx-text">{complete}%</span>)}
         <p className={sub}>
-          of {t.total} this month · {t.counts.progress} in progress · {t.counts.delayed} delayed · {t.counts.unassigned} no owner
+          of {t.total} {persona === "asm" && !single ? "in this period" : "this month"} · {t.counts.progress} in progress · {t.counts.delayed} delayed · {t.counts.unassigned} no owner
         </p>
         <div className="mt-auto">
           <KpiStripes
@@ -539,7 +587,9 @@ function KpiCards({ persona }: { persona: "asm" | "head" }) {
 
 /** Suggested action on an insight: what Sales AI already did (outcome + ✓), or Agreed / Closed when handled. */
 function InsightAction({ id, from = INSIGHT_ACTIONS, bare = false }: { id: string; from?: typeof INSIGHT_ACTIONS; bare?: boolean }) {
-  const a = from[id];
+  // a ticket verified in the Action Tracker closes the insight it came from (use-case step 11)
+  const loopClosed = closedInsights(useLoop())[id];
+  const a = loopClosed ? { closed: `Closed · ${loopClosed}` } : from[id];
   if (!a) return null;
   if ("closed" in a || "agreed" in a) {
     const agreed = "agreed" in a;
@@ -583,7 +633,12 @@ function InsightsCard() {
       <CardHeader
         icon={<Sparkles className="h-4 w-4" />}
         title="Insights"
-        badge={<AiTag />}
+        badge={
+          <span className="flex items-center gap-2">
+            <AiTag />
+            <span className="rounded border border-cx-strong px-1.5 text-[10.5px] font-normal text-cx-text">Today</span>
+          </span>
+        }
         right={
           <button onClick={() => setSheet(null)} className="inline-flex items-center gap-1 text-[12px] text-cx-muted hover:text-cx-text">
             View all <ChevronRight className="h-3 w-3" />
@@ -843,7 +898,7 @@ function MyActionsList({ m }: { m: MyActions }) {
             const sent = nt.assigned[x.id];
             const line = assignmentLine(sent, sent && nt.delivery[sent.id]);
             return (
-              <li id={x.id} key={x.id} className={row}>
+              <li key={x.id} className={row}>
                 <AgentIcon agent={x.source} size="sm" />
                 <span className="min-w-0 flex-1">
                   <span className="block text-[13px] leading-snug text-cx-text">{x.title}</span>
@@ -855,7 +910,6 @@ function MyActionsList({ m }: { m: MyActions }) {
                       <AgentRunChip run={{ ...x.run, result: `Assigned to ${who === "Me" ? "you" : who} and added to Tracker`, link: "View in Tracker" }} />
                     </span>
                   )}
-                  {line && <span className="mt-1.5 block text-[11px] text-cx-faint">{line}{sent ? ` · ${sent.id}` : ""}</span>}
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
                   {!who && (
@@ -884,6 +938,7 @@ function MyActionsList({ m }: { m: MyActions }) {
 
 function TrackerCard({ role }: { role: "asm" | "head" }) {
   const { toast } = useHome();
+  const go = useCortexNav();
   const { meta } = useStatusMeta();
   // My actions is the first, default tab (opening on "Suggested by Sales AI")
   const [scope, setScope] = useState<"team" | "mine">("mine");
@@ -935,9 +990,14 @@ function TrackerCard({ role }: { role: "asm" | "head" }) {
       <CardHeader
         icon={<ListChecks className="h-4 w-4" />}
         title="Action Tracker"
-        badge={<AiTag />}
+        badge={
+          <span className="flex items-center gap-2">
+            <AiTag />
+            <span className="rounded border border-cx-strong px-1.5 text-[10.5px] font-normal text-cx-text">September</span>
+          </span>
+        }
         right={
-          <button onClick={() => toast("Opens the full Action Tracker.")} className="inline-flex items-center gap-1 text-[12px] text-cx-muted hover:text-cx-text">
+          <button onClick={() => go(role === "head" ? "tracker-head" : "tracker")} className="inline-flex items-center gap-1 text-[12px] text-cx-muted hover:text-cx-text">
             View all <ChevronRight className="h-3 w-3" />
           </button>
         }
@@ -1580,10 +1640,11 @@ function Pulse() {
     else setAssistantOpen(false);
   };
   const role = "asm";
+  const asmNav = useAsmNav("home");
 
   return (
     <PinnedCtx.Provider value={{ pinned, setPinned }}>
-      <PageFrame persona={persona} onPersona={changePersona} navActions={<AddWidget mode="button" />}>
+      <PageFrame persona={persona} onPersona={changePersona} {...asmNav} topBarExtra={<PeriodFilter />}>
         {persona === "exec" ? (
           <ExecNote onBack={() => changePersona("asm")} />
         ) : (

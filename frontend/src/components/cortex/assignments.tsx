@@ -7,6 +7,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { apiUrl } from "@/data/source";
 import { LBL } from "@/data/labels";
+import type { Ticket } from "@/data/tracker";
 
 const POLL_MS = 30000;
 
@@ -36,6 +37,9 @@ export interface AssignInput {
   agent?: string;
   kind?: string;
   retailer_id?: string;
+  priority?: "High" | "Medium" | "Low";
+  due_days?: number;
+  note?: string;
 }
 
 export interface AssignResult {
@@ -50,7 +54,16 @@ interface Ctx {
   /** push delivery of the "assigned" notification, by action id (this session only) */
   delivery: Record<string, Delivery | null>;
   assign: (x: AssignInput) => Promise<AssignResult>;
+  /** the ASM's comment on a ticket; the officer sees it in the app */
+  comment: (id: string, text: string, t?: Ticket) => Promise<unknown>;
+  /** verify and close, or send back, what an officer marked done */
+  review: (t: Ticket, decision: "verify" | "send_back", note?: string) => Promise<unknown>;
 }
+
+/** web signal kind → the officer app's signal name (same workbook rule) */
+const APP_SIGNAL: Record<string, string> = { collection: "collection", credit: "credit_limit", gap: "target_gap", short: "short_supply", loyalty: "loyalty" };
+/** for an officer's field action (not a stored assignment) the backend needs who, which retailer and which signal */
+const fieldRef = (t?: Ticket) => (t && !t.stored && t.soId ? { so: t.soId, retailer_id: t.retailerId, signal: t.kind ? APP_SIGNAL[t.kind] : undefined, title: t.title } : {});
 
 const AssignCtx = createContext<Ctx | null>(null);
 
@@ -95,11 +108,24 @@ export function AssignmentsProvider({ children }: { children: React.ReactNode })
     [asm],
   );
 
+  const comment = useCallback(
+    (id: string, text: string, t?: Ticket) => api(`/api/tracker/actions/${encodeURIComponent(id)}/comment`, { method: "POST", body: JSON.stringify({ by: asm, text, ...fieldRef(t) }) }),
+    [asm],
+  );
+  const review = useCallback(
+    (t: Ticket, decision: "verify" | "send_back", note?: string) =>
+      api(`/api/tracker/actions/${encodeURIComponent(t.id)}/review`, { method: "POST", body: JSON.stringify({ by: asm, decision, note, ...fieldRef(t) }) }).then((r) => {
+        if (t.stored) setActions((a) => a.map((x) => (x.id === t.id ? { ...x, st: decision === "verify" ? "closed" : "progress" } : x)));
+        return r;
+      }),
+    [asm],
+  );
+
   // newest assignment per source wins (an item can be re-assigned once the earlier one is closed)
   const assigned: Record<string, AssignedAction> = {};
   for (const a of [...actions].sort((p, q) => p.created - q.created)) assigned[a.source_id] = a;
 
-  return <AssignCtx.Provider value={{ assigned, delivery, assign }}>{children}</AssignCtx.Provider>;
+  return <AssignCtx.Provider value={{ assigned, delivery, assign, comment, review }}>{children}</AssignCtx.Provider>;
 }
 
 /** What became of an assignment, in one line: "Pushed to Paresh Patel's phone", "In progress · …". */

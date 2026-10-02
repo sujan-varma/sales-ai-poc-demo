@@ -6,7 +6,23 @@
 import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { apiUrl, loadCortexData } from "@/data/source";
 
-export type CortexView = "asm" | "leadership" | "thermometer-asm" | "thermometer-head" | "configuration" | "logs-activity" | "logs-priority";
+export type CortexView =
+  | "asm"
+  | "leadership"
+  | "thermometer-asm"
+  | "thermometer-head"
+  | "configuration"
+  | "logs-activity"
+  | "logs-priority"
+  | "asm-logs-activity"
+  | "asm-logs-priority"
+  | "map-plans"
+  | "map-studio"
+  | "pitch"
+  | "pitch-detail"
+  | "pitch-adhoc"
+  | "tracker"
+  | "tracker-head";
 
 type Loader = () => Promise<{ default: React.ComponentType }>;
 
@@ -18,6 +34,15 @@ const LOADERS: Record<CortexView, Loader> = {
   configuration: () => import("@/components/cortex/ConfigurationPage").then((m) => ({ default: m.ConfigurationPage })),
   "logs-activity": () => import("@/components/cortex/LogsPage").then((m) => ({ default: () => <m.LogsPage view="activity" /> })),
   "logs-priority": () => import("@/components/cortex/LogsPage").then((m) => ({ default: () => <m.LogsPage view="priority" /> })),
+  "asm-logs-activity": () => import("@/components/cortex/LogsPage").then((m) => ({ default: () => <m.LogsPage view="activity" persona="asm" /> })),
+  "asm-logs-priority": () => import("@/components/cortex/LogsPage").then((m) => ({ default: () => <m.LogsPage view="priority" persona="asm" /> })),
+  "map-plans": () => import("@/components/cortex/map/MapPlansPage").then((m) => ({ default: m.MapPlansPage })),
+  "map-studio": () => import("@/components/cortex/map/MapStudioPage").then((m) => ({ default: m.MapStudioPage })),
+  pitch: () => import("@/components/cortex/pitch/PitchPage").then((m) => ({ default: m.PitchPage })),
+  "pitch-detail": () => import("@/components/cortex/pitch/PitchDetailPage").then((m) => ({ default: m.PitchDetailPage })),
+  "pitch-adhoc": () => import("@/components/cortex/pitch/PitchAdhocPage").then((m) => ({ default: m.PitchAdhocPage })),
+  tracker: () => import("@/components/cortex/tracker/TrackerPage").then((m) => ({ default: () => <m.TrackerPage persona="asm" /> })),
+  "tracker-head": () => import("@/components/cortex/tracker/TrackerPage").then((m) => ({ default: () => <m.TrackerPage persona="head" /> })),
 };
 
 function Centered({ children }: { children: React.ReactNode }) {

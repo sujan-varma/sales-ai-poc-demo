@@ -13,6 +13,10 @@ Interactive cockpit prototype and wireframe execution for **Cortex** (Sales AI p
 | `/thermometer` | Thermometer agent, ASM view — Performance · Scorecard · Recommendations (read-only; from the agent rail) | `src/components/cortex/thermometer/` + `src/data/thermometer.ts` |
 | `/leadership/thermometer` | Thermometer agent, Head of Sales view (org-wide, scored per region) | same |
 | `/configuration` | Head of Sales Configuration — platform settings and decision thresholds (sidebar icon) | `src/components/cortex/ConfigurationPage.tsx` |
+| `/map` · `/map/studio` | Market Action Plans (index + September plan) · MAP Studio (October draft) — ASM | `src/components/cortex/map/` + `src/data/map.ts` |
+| `/pitch` · `/pitch/detail` · `/pitch/adhoc` | Pitch per sales officer · one pitch · ad hoc pitch — ASM | `src/components/cortex/pitch/` + `src/data/pitch.ts` |
+| `/tracker` · `/leadership/tracker` | Action Tracker board — ASM (My Actions · Team) and Head of Sales (roll-up at ASM level) | `src/components/cortex/tracker/` + `src/data/tracker.ts` |
+| `/asm/logs/priority` · `/asm/logs/activity` | Logs, scoped to the ASM's region | `src/components/cortex/LogsPage.tsx` |
 | `/home-c` → `/asm` | old Option B URL, kept as a redirect | — |
 
 Both pages sit on the shared Option B shell (`src/components/cortex/shell.tsx`) and use only the tokens in [`DESIGN.md`](../DESIGN.md), in dark and light. The persona menu moves between pages. Option A is archived in `archive/option-a/` as reference only.

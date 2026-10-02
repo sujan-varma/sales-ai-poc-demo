@@ -113,3 +113,23 @@ class ActionEvent(BaseModel):
     retailer_id: Optional[str] = None
     signal: Optional[str] = None
     title: Optional[str] = None
+
+
+class ReviewRequest(BaseModel):
+    by: str = Field(min_length=1, description="The ASM", examples=["Raman"])
+    decision: Literal["verify", "send_back"]
+    note: Optional[str] = Field(default=None, max_length=1000)
+    # for an officer's field action (not one assigned in Sales AI): who and which retailer / signal
+    so: Optional[str] = None
+    retailer_id: Optional[str] = None
+    signal: Optional[str] = None
+    title: Optional[str] = None
+
+
+class AsmCommentRequest(BaseModel):
+    by: str = Field(min_length=1, examples=["Raman"])
+    text: str = Field(min_length=1, max_length=1000)
+    so: Optional[str] = None
+    retailer_id: Optional[str] = None
+    signal: Optional[str] = None
+    title: Optional[str] = None
