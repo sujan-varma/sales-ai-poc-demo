@@ -34,7 +34,7 @@ export function TraceTooltip({ trace, heading, label = "How it was decided", com
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={compact ? label : undefined}
-        className={`inline-flex h-6 shrink-0 items-center gap-1 rounded px-1 text-[11.5px] ${open ? "bg-cx-hover text-cx-text" : "text-cx-muted hover:text-cx-text"}`}
+        className={`inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded px-1 text-[11.5px] ${open ? "bg-cx-hover text-cx-text" : "text-cx-muted hover:text-cx-text"}`}
       >
         <Workflow className="h-3 w-3" />
         {!compact && label}

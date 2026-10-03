@@ -615,12 +615,17 @@ function InsightAction({ id, from = INSIGHT_ACTIONS, bare = false }: { id: strin
 
 /** Actions menu + the suggested action's outcome (its trace opens as a tooltip). */
 function SuggestedRow({ id, from = INSIGHT_ACTIONS, rec, routeKey }: { id: string; from?: typeof INSIGHT_ACTIONS; rec?: Recommendation; routeKey: string }) {
+  const [run, setRun] = useState<{ run: AgentRun; key: number } | null>(null);
   return (
-    <div className="flex items-start gap-2">
-      {rec && <ActionsDropdown routeKey={routeKey} rec={rec} />}
-      <div className="min-w-0 flex-1">
-        <InsightAction id={id} from={from} bare />
+    <div className="space-y-2">
+      <div className="flex items-start gap-2">
+        {rec && <ActionsDropdown routeKey={routeKey} rec={rec} onRun={(r) => setRun({ run: r, key: Date.now() })} />}
+        <div className="min-w-0 flex-1">
+          <InsightAction id={id} from={from} bare />
+        </div>
       </div>
+      {/* the run chip spans the full row, so it never squeezes the outcome beside the Actions button */}
+      {run && <AgentRunChip key={run.key} run={run.run} />}
     </div>
   );
 }
@@ -1286,56 +1291,52 @@ function linkedRec(target: string): Recommendation | undefined {
 }
 
 /** One "Actions" mechanic, shared with Thermometer: Send to Tracker · Escalate to Market Action Plan · Send to Pitch. */
-function ActionsDropdown({ routeKey, rec }: { routeKey: string; rec: Recommendation }) {
+function ActionsDropdown({ routeKey, rec, onRun }: { routeKey: string; rec: Recommendation; onRun: (run: AgentRun) => void }) {
   const { routes, toggleRoute, toast } = useHome();
   const [open, setOpen] = useState(false);
-  const [run, setRun] = useState<{ run: AgentRun; key: number } | null>(null);
   const ref = useOutside<HTMLDivElement>(open, () => setOpen(false));
   const active = routes[routeKey] ?? [];
   return (
-    <div className="flex flex-col gap-2">
-      <div ref={ref} className="relative">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          aria-haspopup="menu"
-          className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[12px] ${open ? "border-cx-strong bg-cx-hover text-cx-text" : "border-cx-line text-cx-muted hover:text-cx-text"}`}
-        >
-          <MoreHorizontal className="h-3.5 w-3.5" /> Actions
-          {active.length > 0 && <span className="font-data text-[10.5px] text-cx-faint">· {active.length}</span>}
-          <ChevronDown className="h-3 w-3" />
-        </button>
-        {open && (
-          <div role="menu" className="absolute left-0 top-full z-40 mt-1 w-[270px] rounded-lg border border-cx-strong bg-cx-raised p-1 shadow-2xl">
-            {(Object.keys(ROUTE_META) as RecRoute[]).map((k) => {
-              const m = ROUTE_META[k];
-              const on = active.includes(k);
-              const Icon = on ? Check : m.icon;
-              return (
-                <button
-                  key={k}
-                  role="menuitemcheckbox"
-                  aria-checked={on}
-                  onClick={() => {
-                    toggleRoute(routeKey, k);
-                    setOpen(false);
-                    if (on) toast(`Removed from ${k === "map" ? "the October plan" : k === "pitch" ? "Pitch" : "Tracker"}.`);
-                    else setRun({ run: routeRun(rec, k), key: Date.now() });
-                  }}
-                  className="flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left hover:bg-cx-hover"
-                >
-                  <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: m.color }} />
-                  <span className="min-w-0">
-                    <span className="block text-[12.5px] text-cx-text">{on ? m.done(rec) : m.idle(rec).split(" · ")[0]}</span>
-                    {k === "pitch" && <span className="block truncate text-[11px] text-cx-faint">for {rec.pitchFor}</span>}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-      {run && <AgentRunChip key={run.key} run={run.run} />}
+    <div ref={ref} className="relative shrink-0">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[12px] ${open ? "border-cx-strong bg-cx-hover text-cx-text" : "border-cx-line text-cx-muted hover:text-cx-text"}`}
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" /> Actions
+        {active.length > 0 && <span className="font-data text-[10.5px] text-cx-faint">· {active.length}</span>}
+        <ChevronDown className="h-3 w-3" />
+      </button>
+      {open && (
+        <div role="menu" className="absolute left-0 top-full z-40 mt-1 w-[270px] rounded-lg border border-cx-strong bg-cx-raised p-1 shadow-2xl">
+          {(Object.keys(ROUTE_META) as RecRoute[]).map((k) => {
+            const m = ROUTE_META[k];
+            const on = active.includes(k);
+            const Icon = on ? Check : m.icon;
+            return (
+              <button
+                key={k}
+                role="menuitemcheckbox"
+                aria-checked={on}
+                onClick={() => {
+                  toggleRoute(routeKey, k);
+                  setOpen(false);
+                  if (on) toast(`Removed from ${k === "map" ? "the October plan" : k === "pitch" ? "Pitch" : "Tracker"}.`);
+                  else onRun(routeRun(rec, k));
+                }}
+                className="flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left hover:bg-cx-hover"
+              >
+                <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: m.color }} />
+                <span className="min-w-0">
+                  <span className="block text-[12.5px] text-cx-text">{on ? m.done(rec) : m.idle(rec).split(" · ")[0]}</span>
+                  {k === "pitch" && <span className="block truncate text-[11px] text-cx-faint">for {rec.pitchFor}</span>}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
