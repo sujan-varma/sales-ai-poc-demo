@@ -9,6 +9,7 @@ import React, { useMemo, useState } from "react";
 import { ArrowRight, CalendarDays, ChartColumn, ChevronsRight, CircleCheck, Info, LayoutGrid, List, Maximize2, Minimize2, Package, ShieldCheck, Star, Tag, Target } from "lucide-react";
 import { CATEGORY_LABEL, CB_CRITERIA, ENTITIES, Entity, FUNCTIONS, HUDDLE_LABELS, INSIGHTS, MEETINGS, Meeting, PRODUCTS, SEGMENTS, STATE, TIME_RANGES, TREND, allMeetings, inRange } from "@/data/huddle";
 import { AgentPageHeader } from "../agentPage";
+import { CenterModal } from "../modal";
 import { useCortexNav } from "../nav";
 import { AiInferred, BAND, CardHead, Chip, Empty, HuddlePage, LineChart, Legend, SegTabs, Select, body, btn, bucketOf, card, shortDay, useLiveAction, useOpen, useTimeRange } from "./parts";
 
@@ -126,7 +127,7 @@ function FieldOpsHealth() {
     <section className={`${card} p-5`}>
       <CardHead
         title="Field Operations Health"
-        sub="One cell = one entity at the selected level. Color = current status. Hover for full hierarchy and details."
+        sub="One cell = one entity at the selected level. Color = current status. Click a score for its hierarchy and how it's made."
         right={
           <>
             <button onClick={() => setExpanded((x) => !x)} className={`${btn} disabled:opacity-40`} disabled={cells.length <= 9}>
@@ -204,8 +205,9 @@ const parentName = (e: Entity) => ENTITIES.find((x) => x.id === e.parent)?.name;
 
 function EntityCell({ e, onDrill }: { e: Entity; onDrill: () => void }) {
   const c = BAND[e.band].color;
+  const [open, setOpen] = useState(false);
   return (
-    <div className="group relative rounded-lg border p-4" style={{ background: `${c}12`, borderColor: `${c}55` }}>
+    <div className="relative rounded-lg border p-4" style={{ background: `${c}12`, borderColor: `${c}55` }}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-[13px] text-cx-text">{e.name}</p>
@@ -219,27 +221,44 @@ function EntityCell({ e, onDrill }: { e: Entity; onDrill: () => void }) {
           </button>
         )}
       </div>
-      <p className="mt-2 font-data text-[24px]" style={{ color: c }}>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-haspopup="dialog"
+        aria-label={`${e.name}: score ${e.score ?? "not available"}. Show how it's made.`}
+        className="mt-2 inline-flex items-baseline gap-1.5 rounded font-data text-[24px] hover:opacity-85"
+        style={{ color: c }}
+      >
         {e.score ?? "—"}
-      </p>
-      {/* hover: the hierarchy and how the score is made */}
-      <div className="pointer-events-none absolute left-3 right-3 top-full z-20 mt-1 hidden rounded-lg border border-cx-strong bg-cx-raised p-3 shadow-2xl group-hover:block">
-        <p className="text-[11.5px] text-cx-faint">
-          {STATE}
-          {parentName(e) ? ` › ${parentName(e)}` : ""} › <span className="text-cx-text">{e.name}</span>
-        </p>
-        <p className="mt-1 text-[11.5px] text-cx-faint">{e.retailers} retailers</p>
-        <div className="mt-2 space-y-1">
-          {CB_CRITERIA.map((cr) => (
-            <p key={cr.name} className="flex justify-between gap-3 text-[11.5px]">
-              <span className="text-cx-muted">
-                {cr.name} <span className="text-cx-faint">{cr.weight}%</span>
-              </span>
-              <span className="font-data text-cx-text">{e.parts[cr.name] ?? "—"}</span>
-            </p>
-          ))}
-        </div>
-      </div>
+        <span className="font-sans text-[11px] text-cx-faint underline decoration-dotted underline-offset-2">How it's scored</span>
+      </button>
+      {open && (
+        <CenterModal title={`${e.name} · how the score is made`} onClose={() => setOpen(false)} width="max-w-[400px]">
+          <p className="text-[11.5px] text-cx-faint">
+            {STATE}
+            {parentName(e) ? ` › ${parentName(e)}` : ""} › <span className="text-cx-text">{e.name}</span>
+          </p>
+          <p className="mt-1 text-[11.5px] text-cx-faint">
+            {e.retailers} retailers · {e.meetings} meetings
+          </p>
+          <p className="mt-3 flex items-baseline gap-2">
+            <span className="font-data text-[26px] leading-none" style={{ color: c }}>
+              {e.score ?? "—"}
+            </span>
+            <span className="text-[12px] text-cx-faint">overall {overall(e)}</span>
+          </p>
+          <div className="mt-3 space-y-1.5 border-t border-cx-line pt-3">
+            {CB_CRITERIA.map((cr) => (
+              <p key={cr.name} className="flex justify-between gap-3 text-[12px]">
+                <span className="text-cx-muted">
+                  {cr.name} <span className="text-cx-faint">{cr.weight}%</span>
+                </span>
+                <span className="font-data text-cx-text">{e.parts[cr.name] ?? "—"}</span>
+              </p>
+            ))}
+          </div>
+        </CenterModal>
+      )}
     </div>
   );
 }

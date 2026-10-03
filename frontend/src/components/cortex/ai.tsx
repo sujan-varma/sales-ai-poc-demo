@@ -4,11 +4,12 @@
 // Every AI-generated item renders <AiMeta confidence={...} /> — tag and score
 // are always shown together, and the score always explains itself.
 // Option A (Console) opts into a section-level tag and a blue pill score via
-// <AiStyleProvider value="pill">; the explain-on-interaction popover is shared.
+// <AiStyleProvider value="pill">; clicking the score opens the shared "Why this score" modal.
 
-import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import React, { createContext, useContext, useState } from "react";
 import { Check, Sparkles } from "lucide-react";
 import { AGENTS, Confidence } from "@/data/cortexHome";
+import { CenterModal } from "./modal";
 
 type AiStyle = "meter" | "pill" | "capsule";
 const AiStyleCtx = createContext<AiStyle>("meter");
@@ -80,43 +81,22 @@ function Meter({ score }: { score: number }) {
   );
 }
 
-export function ConfidenceScore({ confidence, align = "left" }: { confidence: Confidence; align?: "left" | "right" }) {
-  const [hover, setHover] = useState(false);
-  const [pinned, setPinned] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
-  const open = hover || pinned;
-
-  useEffect(() => {
-    if (!pinned) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setPinned(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPinned(false);
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [pinned]);
-
+/** `align` is kept for callers; the explanation now opens as a centred modal, so it no longer applies. */
+export function ConfidenceScore({ confidence }: { confidence: Confidence; align?: "left" | "right" }) {
+  const [open, setOpen] = useState(false);
   const band = confidenceBand(confidence.score);
   const style = useContext(AiStyleCtx);
 
   return (
-    <span
-      ref={ref}
-      className="relative inline-flex"
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-    >
+    <span className="relative inline-flex">
       <button
         type="button"
+        aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Confidence ${confidence.score} of 100, ${band}. Show why.`}
         onClick={(e) => {
           e.stopPropagation();
-          setPinned((p) => !p);
+          setOpen(true);
         }}
         className={
           style === "capsule"
@@ -148,12 +128,12 @@ export function ConfidenceScore({ confidence, align = "left" }: { confidence: Co
           </>
         )}
       </button>
-      {open && <ConfidencePopover confidence={confidence} align={align} />}
+      {open && <ConfidenceModal confidence={confidence} onClose={() => setOpen(false)} />}
     </span>
   );
 }
 
-function ConfidencePopover({ confidence, align }: { confidence: Confidence; align: "left" | "right" }) {
+function ConfidenceModal({ confidence, onClose }: { confidence: Confidence; onClose: () => void }) {
   const { score, rationale, factors, sources, rescoredAt } = confidence;
   const independent = sources.filter((s) => s.independent).length;
   const ages = sources.map((s) => s.ageHours);
@@ -165,79 +145,76 @@ function ConfidencePopover({ confidence, align }: { confidence: Confidence; alig
   ];
 
   return (
-    <span
-      className={`absolute top-full z-50 block pt-1.5 ${align === "right" ? "right-0" : "left-0"}`}
-      onClick={(e) => e.stopPropagation()}
+    <CenterModal
+      onClose={onClose}
+      frame={tone.card}
+      meta={`re-scored ${rescoredAt}`}
+      title={
+        <span className={`flex items-center gap-1.5 font-data text-[11px] font-normal uppercase tracking-[0.08em] ${tone.text}`}>
+          <Sparkles className="h-3.5 w-3.5" /> Why this score
+        </span>
+      }
     >
-      <span role="dialog" className={`block w-[320px] max-w-[calc(100vw-32px)] rounded-lg border p-3.5 text-left shadow-[0_16px_48px_rgba(0,0,0,0.6)] ${tone.card}`}>
-        <span className="flex items-baseline justify-between">
-          <span className={`flex items-center gap-1.5 font-data text-[10px] uppercase tracking-[0.08em] ${tone.text}`}>
-            <Sparkles className="h-3 w-3" /> Why this score
+      <span className="flex items-baseline gap-2">
+        <span className="font-data text-[26px] leading-none text-cx-text tabular-nums">{score}%</span>
+        <span className="font-data text-xs text-cx-faint">confidence</span>
+      </span>
+      <span className="mt-2 block text-[12.5px] leading-snug text-cx-muted">{rationale}</span>
+
+      <span className="mt-3 grid grid-cols-3 gap-px overflow-hidden rounded border border-cx-line bg-cx-line">
+        {[
+          ["Sources", String(sources.length)],
+          ["Independent", `${independent} of ${sources.length}`],
+          ["Freshest", ageLabel(Math.min(...ages))],
+        ].map(([k, v]) => (
+          <span key={k} className={`block px-2 py-1.5 ${tone.cell}`}>
+            <span className="block text-[10px] text-cx-faint">{k}</span>
+            <span className="block font-data text-[12px] text-cx-text">{v}</span>
           </span>
-          <span className="font-data text-[10px] text-cx-faint">re-scored {rescoredAt}</span>
-        </span>
+        ))}
+      </span>
 
-        <span className="mt-2 flex items-baseline gap-2">
-          <span className="font-data text-[26px] leading-none text-cx-text tabular-nums">{score}%</span>
-          <span className="font-data text-xs text-cx-faint">confidence</span>
-        </span>
-        <span className="mt-2 block text-[12.5px] leading-snug text-cx-muted">{rationale}</span>
-
-        <span className="mt-3 grid grid-cols-3 gap-px overflow-hidden rounded border border-cx-line bg-cx-line">
-          {[
-            ["Sources", String(sources.length)],
-            ["Independent", `${independent} of ${sources.length}`],
-            ["Freshest", ageLabel(Math.min(...ages))],
-          ].map(([k, v]) => (
-            <span key={k} className={`block px-2 py-1.5 ${tone.cell}`}>
-              <span className="block text-[10px] text-cx-faint">{k}</span>
-              <span className="block font-data text-[12px] text-cx-text">{v}</span>
+      <span className="mt-3 block space-y-1.5">
+        {factorRows.map(([label, v]) => (
+          <span key={label} className="flex items-center gap-2">
+            <span className="w-[110px] shrink-0 text-[11px] text-cx-faint">{label}</span>
+            <span className="relative h-1 flex-1 rounded-sm bg-cx-strong">
+              <span className={`absolute inset-y-0 left-0 rounded-sm ${tone.bar}`} style={{ width: `${v * 100}%`, opacity: 0.4 + v * 0.6 }} />
             </span>
-          ))}
-        </span>
+            <span className="w-7 text-right font-data text-[10.5px] text-cx-muted tabular-nums">{Math.round(v * 100)}</span>
+          </span>
+        ))}
+      </span>
 
-        <span className="mt-3 block space-y-1.5">
-          {factorRows.map(([label, v]) => (
-            <span key={label} className="flex items-center gap-2">
-              <span className="w-[110px] shrink-0 text-[11px] text-cx-faint">{label}</span>
-              <span className="relative h-1 flex-1 rounded-sm bg-cx-strong">
-                <span className={`absolute inset-y-0 left-0 rounded-sm ${tone.bar}`} style={{ width: `${v * 100}%`, opacity: 0.4 + v * 0.6 }} />
-              </span>
-              <span className="w-7 text-right font-data text-[10.5px] text-cx-muted tabular-nums">{Math.round(v * 100)}</span>
-            </span>
-          ))}
-        </span>
-
-        <span className="mt-3 block border-t border-cx-line pt-2.5">
-          <span className="mb-1.5 block font-data text-[10px] uppercase tracking-[0.08em] text-cx-faint">Fed by</span>
-          <span className="block space-y-2">
-            {sources.map((s, i) => (
-              <span key={i} className="flex gap-2">
-                <span className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-[2px]" style={{ background: AGENTS[s.agent].color }} />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-baseline justify-between gap-2">
-                    <span className="truncate text-[12px] text-cx-text">
-                      <span style={{ color: AGENTS[s.agent].color }}>{AGENTS[s.agent].name}</span> · {s.title}
+      <span className="mt-3 block border-t border-cx-line pt-2.5">
+        <span className="mb-1.5 block font-data text-[10px] uppercase tracking-[0.08em] text-cx-faint">Fed by</span>
+        <span className="block space-y-2">
+          {sources.map((s, i) => (
+            <span key={i} className="flex gap-2">
+              <span className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-[2px]" style={{ background: AGENTS[s.agent].color }} />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-baseline justify-between gap-2">
+                  <span className="truncate text-[12px] text-cx-text">
+                    <span style={{ color: AGENTS[s.agent].color }}>{AGENTS[s.agent].name}</span> · {s.title}
+                  </span>
+                  <span className="shrink-0 font-data text-[10px] text-cx-faint">{ageLabel(s.ageHours)}</span>
+                </span>
+                <span className="flex items-center justify-between gap-2 text-[11px] text-cx-faint">
+                  <span className="truncate">{s.detail}</span>
+                  {s.independent ? (
+                    <span className={`flex shrink-0 items-center gap-0.5 ${tone.dim}`}>
+                      <Check className="h-3 w-3" /> independent
                     </span>
-                    <span className="shrink-0 font-data text-[10px] text-cx-faint">{ageLabel(s.ageHours)}</span>
-                  </span>
-                  <span className="flex items-center justify-between gap-2 text-[11px] text-cx-faint">
-                    <span className="truncate">{s.detail}</span>
-                    {s.independent ? (
-                      <span className={`flex shrink-0 items-center gap-0.5 ${tone.dim}`}>
-                        <Check className="h-3 w-3" /> independent
-                      </span>
-                    ) : (
-                      <span className="shrink-0">context only</span>
-                    )}
-                  </span>
+                  ) : (
+                    <span className="shrink-0">context only</span>
+                  )}
                 </span>
               </span>
-            ))}
-          </span>
+            </span>
+          ))}
         </span>
       </span>
-    </span>
+    </CenterModal>
   );
 }
 

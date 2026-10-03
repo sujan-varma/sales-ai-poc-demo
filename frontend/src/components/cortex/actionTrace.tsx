@@ -1,99 +1,54 @@
 "use client";
 
 // A suggested action, shown as what Sales AI has already done ("Push to Pitch engine ✓"),
-// with its own orchestration trace in a "How it was decided" tooltip. Same visual language as the
+// with its own orchestration trace behind a "How it was decided" button (a modal). Same visual language as the
 // Leadership orchestration view (rail, cx-glow on the active step, trace chips),
 // scoped to this one action — never a day-wide log.
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Check, CircleDot, CornerDownRight, GitBranch, Inbox, Scale, Workflow } from "lucide-react";
 import { AGENTS } from "@/data/cortexHome";
 import { ActionTrace } from "@/data/actionTraces";
 import { useHome } from "./HomeState";
 import { linkPage, useCortexNav } from "./nav";
 import { AgentIcon } from "./primitives";
+import { CenterModal } from "./modal";
 
 const STEP_MS = 650;
 const DONE = "#2fa85c";
 
 /**
- * "How it was decided" — a hover tooltip (also opens on focus or tap) holding one action's
- * trace, over a slightly dimmed page so it reads as its own layer. Fixed-positioned beside
- * the trigger and kept inside the viewport; stays open while the pointer is over it.
+ * "How it was decided" — a button that opens one action's trace in a centred modal (the same frame as the
+ * confidence score's "Why this score"). The label varies by place: "Why it's in the plan", "Evidence", …
  */
 export function TraceTooltip({ trace, heading, label = "How it was decided", compact = false }: { trace: ActionTrace; heading?: string; label?: string; compact?: boolean }) {
-  const [rect, setRect] = useState<DOMRect | null>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout>>();
-  const show = () => {
-    clearTimeout(closeTimer.current);
-    if (trigger.current) setRect(trigger.current.getBoundingClientRect());
-  };
-  const hide = () => {
-    closeTimer.current = setTimeout(() => setRect(null), 140);
-  };
-  useEffect(() => {
-    if (!rect) return;
-    const k = (e: KeyboardEvent) => e.key === "Escape" && setRect(null);
-    const s = () => setRect(null);
-    document.addEventListener("keydown", k);
-    window.addEventListener("scroll", s, { passive: true });
-    return () => {
-      document.removeEventListener("keydown", k);
-      window.removeEventListener("scroll", s);
-    };
-  }, [rect]);
-  useEffect(() => () => clearTimeout(closeTimer.current), []);
-
-  const W = 420;
-  let pos: React.CSSProperties = {};
-  if (rect && typeof window !== "undefined") {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const w = Math.min(W, vw - 24);
-    const left = Math.min(Math.max(12, rect.left + rect.width / 2 - w / 2), vw - w - 12);
-    const below = rect.bottom + 8;
-    const roomBelow = vh - below;
-    pos = roomBelow > 360 || rect.top < vh / 2 ? { left, top: below, width: w, maxHeight: vh - below - 12 } : { left, bottom: vh - rect.top + 8, width: w, maxHeight: rect.top - 20 };
-  }
-
+  const [open, setOpen] = useState(false);
   return (
     <>
       <button
-        ref={trigger}
         type="button"
-        onMouseEnter={show}
-        onMouseLeave={hide}
-        onFocus={show}
-        onBlur={hide}
-        onClick={() => (rect ? setRect(null) : show())}
-        aria-expanded={!!rect}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(true);
+        }}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         aria-label={compact ? label : undefined}
-        className={`inline-flex h-6 shrink-0 items-center gap-1 rounded px-1 text-[11.5px] ${rect ? "bg-cx-hover text-cx-text" : "text-cx-muted hover:text-cx-text"}`}
+        className={`inline-flex h-6 shrink-0 items-center gap-1 rounded px-1 text-[11.5px] ${open ? "bg-cx-hover text-cx-text" : "text-cx-muted hover:text-cx-text"}`}
       >
         <Workflow className="h-3 w-3" />
         {!compact && label}
       </button>
-      {rect && (
-        <>
-          {/* the dim keeps the trace visually apart from the page beneath */}
-          <div aria-hidden className="cx-land-fade pointer-events-none fixed inset-0 z-[65] bg-black/40" />
-          <div
-            role="tooltip"
-            onMouseEnter={show}
-            onMouseLeave={hide}
-            className="cx-land-fade fixed z-[66] overflow-y-auto rounded-lg border border-cx-strong bg-cx-bg p-3.5 shadow-[0_16px_48px_rgba(0,0,0,0.5)]"
-            style={pos}
-          >
-            <ActionTraceSteps trace={trace} heading={heading} />
-          </div>
-        </>
+      {open && (
+        <CenterModal title={label} onClose={() => setOpen(false)} width="max-w-[480px]">
+          <ActionTraceSteps trace={trace} heading={heading} />
+        </CenterModal>
       )}
     </>
   );
 }
 
-/** The done-state control; "How it was decided" opens the action's trace as a tooltip. */
+/** The done-state control; "How it was decided" opens the action's trace in a modal. */
 export function SuggestedOutcome({
   label,
   trace,
