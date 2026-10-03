@@ -1278,7 +1278,7 @@ function RouteButtons({
 function routeRun(r: Recommendation, k: RecRoute): AgentRun {
   if (k === "tracker") return { agent: "thermometer", steps: ["creating the action", "suggesting an owner"], result: `Added to Tracker — ${r.territory} queue`, link: "View in Tracker" };
   if (k === "map") return { agent: "map", steps: ["opening the October draft", "adding a suggested initiative"], result: "Added to the October plan as a suggested initiative", link: "View plan" };
-  return { agent: "pitch", steps: ["updating priorities", "plan modified"], result: `Updated pitch priorities for ${r.pitchFor} — ${4 + r.n * 2} outlets affected`, link: "View pitch" };
+  return { agent: "pitch", steps: ["updating priorities", "plan modified"], result: `Updated pitch priorities for ${r.pitchFor} — ${r.outlets} outlet${r.outlets === 1 ? "" : "s"} affected`, link: "View pitch" };
 }
 
 /** The recommendation a finding or insight points at (for the Pitch target). */

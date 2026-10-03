@@ -4,7 +4,7 @@
 // `pitch`); a pitch counts as visited when the officer's last recorded visit is on or after the plan date.
 
 import { ActionTrace } from "./actionTraces";
-import { AgentId } from "./cortexHome";
+import { AgentId, scoreFrom } from "./cortexHome";
 import { Initiative, MAP_LABELS, Priority, SEP_INITIATIVES, SEP_PLAN, Territory, execFor } from "./map";
 import { D } from "./source";
 
@@ -182,7 +182,8 @@ function planPoint(i: Initiative): Omit<TalkingPoint, "n"> {
     why: i.description.split(". ")[0] + ".",
     logic: `Plan initiative #${i.n} · ${i.priority} priority`,
     evidence: `Market Action Plan · ${SEP_PLAN.label.split(" ")[0]} · #${i.n}`,
-    conf: i.priority === "High" ? 92 : 81,
+    // the plan line traces back to one workbook signal: same sheet-count rule as every other score
+    conf: scoreFrom(1),
     fromPlan: i.n,
   };
 }

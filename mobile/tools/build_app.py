@@ -79,7 +79,9 @@ rep("const inr=n=>'₹ '+Number(n).toLocaleString('en-IN');", """const inr=n=>'�
 /* ---------- backend data (GET /api/app/bootstrap) ---------- */
 const B=window.BOOT,HOME_TERR=B.home_territory;
 const TD=new Date(B.today+'T00:00:00'),TODAY0={y:TD.getFullYear(),m:TD.getMonth(),d:TD.getDate()},TODAY_DD=String(TODAY0.d).padStart(2,'0');
-const crl=v=>v>=1e7?[(v/1e7).toFixed(2).replace(/\\.?0+$/,''),'Cr']:[(v/1e5).toFixed(1).replace(/\\.0$/,''),'L'];""")
+const crl=v=>v>=1e7?[(v/1e7).toFixed(2).replace(/\\.?0+$/,''),'Cr']:[(v/1e5).toFixed(1).replace(/\\.0$/,''),'L'];
+// month labels from the workbook's data date: the MTD month and the month before it (the last full month's sales)
+const M3=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],DA=new Date(B.data_as_of+'T00:00:00'),DATA_M=M3[DA.getMonth()],PREV_M=M3[(DA.getMonth()+11)%12];""")
 
 # home: visits / calendar
 rep("let totalVisits=15, curVisit=null;", "let totalVisits=B.home.visits_done, curVisit=null;")
@@ -92,7 +94,7 @@ enter.dashboard=()=>{
   document.querySelectorAll('#dashboard .rows > div').forEach((r,i)=>{const c=cats[i];r.style.visibility=c?'':'hidden';if(!c)return;
     const [a,b]=r.querySelectorAll('p');a.lastChild.textContent=L(c.actual_value);b.lastChild.textContent=L(c.target_value)});
   const pct=c=>Math.round(c.achievement_pct||0),max=Math.max(100,Math.ceil(Math.max(...cats.map(pct))/25)*25);
-  barChart($('#chDash'),{max,ticks:4,bw:65,step:81,off:15,rl:'Sep MTD Achievement Vs Target %',
+  barChart($('#chDash'),{max,ticks:4,bw:65,step:81,off:15,rl:DATA_M+' MTD Achievement Vs Target %',
     bars:cats.map((c,i)=>({v:pct(c),lbl:pct(c)+'%',c:DCOL[i%3][0],t:DCOL[i%3][1]}))});
 };""")
 rep("const MON=[['JAN',25],['FEB',75],['MAR',200],['APR',100],['MAY',76],['JUN',82],['JUL',66]];", "const MON=B.charts.MON;")
@@ -155,12 +157,12 @@ function openSheet(k){
   const s=$('#sheet'),x=curCust(),c=x&&x.c,row=(a,b)=>`<div class="row"><span>${a}</span><span>${esc(b==null||b===''?'—':b)}</span></div>`;
   s.innerHTML=k==='acct'
    ?'<h4>Account Details</h4>'+(c?row('Account',x.v.n)+row('Owner',c.owner)+row('Mobile',c.mobile)+row('Location',c.loc)+row('Category',c.type+' · Class '+c.class)+row('Distributor',c.distributor)+row('Outstanding',c.outstanding):'<p class="sp">Check in to a visit to see the account.</p>')
-   :'<h4>Last Order</h4>'+(c?row('Order',c.lastOrder)+topSkus(c,'last_month_qty',6).map(p=>row(p.name+' · '+p.pack+' (Aug)',p.last_month_qty+' Units')).join(''):'<p class="sp">Check in to a visit to see the last order.</p>');
+   :'<h4>Last Order</h4>'+(c?row('Order',c.lastOrder)+topSkus(c,'last_month_qty',6).map(p=>row(p.name+' · '+p.pack+' ('+PREV_M+')',p.last_month_qty+' Units')).join(''):'<p class="sp">Check in to a visit to see the last order.</p>');
   s.classList.add('show');$('#scrim').classList.add('show','dark');
 }
 enter.s2=()=>{const x=curCust(),l=topSkus(x&&x.c,'last_month_qty',3);
   document.querySelectorAll('#s2 .srow').forEach((r,i)=>{const p=l[i];r.style.display=p?'':'none';if(!p)return;
-    r.querySelector('b').textContent=p.name+' · '+p.pack;r.querySelector('small').textContent='Aug Sales';r.querySelector('span').textContent=p.last_month_qty+' Units';
+    r.querySelector('b').textContent=p.name+' · '+p.pack;r.querySelector('small').textContent=PREV_M+' Sales';r.querySelector('span').textContent=p.last_month_qty+' Units';
     const inp=r.querySelector('input');inp.value='';inp.setAttribute('aria-label',p.name+' current inventory')})};
 enter.s3=()=>{const x=curCust(),l=topSkus(x&&x.c,'gap_qty',3);
   document.querySelectorAll('#s3 .rrow').forEach((r,i)=>{const p=l[i];r.style.display=p?'':'none';if(!p)return;
@@ -173,6 +175,8 @@ rep("const BASE=new Date(2026,8,30); // the app's \"today\" (WED 30 SEP)", "cons
 cut("let ACTS=[\n mk('TKT-2331'", "'Complete the monthly stock count at the depot.')];", "let ACTS=B.actions;")
 cut("let NOTIFS=[\n", " ];\n", "let NOTIFS=B.notifications;\n")
 rep("$('#dRole').textContent=U[role].r+' · Saurashtra';", "$('#dRole').textContent=U[role].r+' · '+HOME_TERR;")
+# the officer's role comes from the backend users (4. Retailer_Master's "Sales officer"), not the mockup's "Sales Executive"
+rep("You (${U.ajay.n}, Sales Executive)", "You (${U.ajay.n}, ${U.ajay.r})")
 rep("const who=id=>id===role?'You':(id==='rajesh'?'Rajesh':U[id].n);", "const who=id=>id===role?'You':(id==='rajesh'?U.rajesh.f:U[id].n);")
 rep("let F={terr:'Saurashtra',", "let F={terr:HOME_TERR,")
 

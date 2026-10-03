@@ -43,7 +43,8 @@ DATA_GAPS = [
     {"area": "Daily / weekly sales", "detail": "Sales are monthly (Sep to the 20th). 'Today' and 'This week' are the Sep MTD daily average × 1 and × 7."},
     {"area": "Stock cover", "detail": "No stock data. The health grid's Stock column shows short-supplied orders from '15. Logistics fulfilment' instead."},
     {"area": "Competitor pricing", "detail": "No price data. The Pricing column shows the company's share of market size per micro market from 'Data 11 - Market Size'."},
-    {"area": "AI confidence scores", "detail": "No model outputs. Confidence is computed from how many workbook sheets support each item and how fresh they are."},
+    {"area": "AI confidence scores", "detail": "No model outputs. Confidence is 58 plus 9 for every workbook sheet an item is computed from (at most 92); freshness is the data's age on the app's date."},
+    {"area": "Partner appointment dates", "detail": "Retailers marked 'Not applicable' in Onboarded On and the 33 distributors have no appointment date in the workbook, so none is shown."},
     {"area": "Activity log events", "detail": "No event log. The log is built from dated workbook records: SO visits, distributor orders and payments received."},
     {"area": "Decisions taken, routes, outcomes", "detail": "No decision history. Decisions are proposed from signals above the Configuration thresholds; nothing is marked as already decided."},
     {"area": "Initiative outcomes, acceptance, duplicates", "detail": "No initiative records; the roll-up groups signals by territory and type, with no accepted/rejected split."},
@@ -91,20 +92,26 @@ def first(name: str) -> str:
     return str(name).split()[0]
 
 
-def conf(score: int, rationale: str, sources: list[dict[str, Any]], at: str = "08:00") -> dict[str, Any]:
+DATA_LABEL = f"{AS_OF.day} {MON[AS_OF.month - 1]}"
+# freshness: how old the workbook's data is on the app's "today" (1.0 = same day, -0.1 for every 3 days)
+FRESHNESS = round(max(0.5, 1 - (TODAY - AS_OF).days / 30), 2)
+
+
+def conf(score: int, rationale: str, sources: list[dict[str, Any]], at: str = DATA_LABEL) -> dict[str, Any]:
     ind = sum(1 for s in sources if s["independent"])
     return {
         "score": score, "rationale": rationale,
-        "factors": {"corroboration": round(min(0.95, 0.45 + 0.15 * ind), 2), "freshness": 0.86, "reliability": round(score / 100, 2)},
+        "factors": {"corroboration": round(min(0.95, 0.45 + 0.15 * ind), 2), "freshness": FRESHNESS, "reliability": round(score / 100, 2)},
         "sources": sources, "rescoredAt": at,
     }
 
 
 def src(agent: str, title: str, detail: str, independent: bool = True, hours: float = 24) -> dict[str, Any]:
-    return {"agent": agent, "title": title, "detail": detail, "when": "Excel · 20 Sep", "ageHours": hours, "independent": independent}
+    return {"agent": agent, "title": title, "detail": detail, "when": f"Excel · {DATA_LABEL}", "ageHours": hours, "independent": independent}
 
 
 def score_from(n_sheets: int, base: int = 58) -> int:
+    """Confidence: 58 plus 9 for every workbook sheet the item is computed from, capped at 92."""
     return min(92, base + 9 * n_sheets)
 
 
@@ -178,7 +185,7 @@ class _Org:
                 "overdue": _n(c.get("Outstanding as on 20th Sep (Overdue outside credit period)")),
                 "outstanding": _n(c.get("Outstanding as on 20th Sep (Due+ Overdue)")),
                 "ageing": int(_n(c.get("Ageing (days) of Outstanding overdue outside credit limit period "))),
-                "util": _n(c.get("Credit limit utilisation %")), "limit": _n(c.get("Credit limit value")),
+                "util": _n(c.get("Credit limit utilisation %")), "limit": _n(c.get("Credit limit value")), "credit_days": int(_n(c.get("Credit period"))),
                 "bounces": int(_n(c.get("Cheque bounces in last 6 months"))), "risk": c.get("Risk category (High medium low no)"),
                 "paid_on": _date(c.get("Last paid on")), "paid": _n(c.get("Last paid value")),
                 "ach": ach if isinstance(ach, (int, float)) else None, "gap": _n(p.get("Gap / Total")),
@@ -262,7 +269,8 @@ def retailer_signals(f: dict) -> list[dict[str, Any]]:
         out.append(dict(kind="short", agent="thermometer", signal="Stock", value=0.0,
                         title=f"Resolve short supply of {f['short_sku']} ({int(f['short_qty'])} units)", delayed=False, pri=2))
     if f["visit"] is None or (AS_OF - f["visit"]).days > 30:
-        out.append(dict(kind="coverage", agent="pitch", signal="Coverage", value=f["sep_t"] * 0.5,
+        # value at stake: the part of the retailer's Sep target not yet billed
+        out.append(dict(kind="coverage", agent="pitch", signal="Coverage", value=max(0.0, f["sep_t"] - f["sep"]),
                         title="Visit — not visited in 30+ days" if f["visit"] else "First SO visit — never visited", delayed=f["visit"] is None, pri=1))
     l2 = f["loy2"]
     add = l2.get("Additional qty sale required in sep to reach next slab")
@@ -420,11 +428,14 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
     # ---- recommendations (ASM territories)
     recs = []
 
-    def add_rec(territory, signal, title, why, impact, label, pitch_for, product, segment, sources, rationale):
+    def add_rec(territory, signal, title, why, impact, label, pitch_for, product, segment, sources, rationale, outlets):
         n = len(recs) + 1
         recs.append({"id": f"rec-{n}", "n": n, "territory": territory, "signal": signal, "title": title, "why": why,
                      "impactL": round(L(impact), 2), "impactLabel": label, "pitchFor": pitch_for, "product": product, "sector": "Retail",
-                     "segment": segment, "raisedHoursAgo": 24 + n, "confidence": conf(score_from(len(sources)), rationale, sources)})
+                     "segment": segment, "outlets": outlets, "raisedHoursAgo": 24 + n, "confidence": conf(score_from(len(sources)), rationale, sources)})
+
+    price_of = {p["sku_id"]: _n(p["Retailer price"]) for p in org.products}
+    under60 = lambda fs: [f for f in fs if f["ach"] is not None and f["ach"] < 0.6]
 
     def top_cat(fs, gap=True):
         g = Counter()
@@ -442,17 +453,17 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
             add_rec(t, "Collection", f"Collect {inr(_sum(od, 'overdue'))} overdue from {len(od)} retailers; start with {topf['name']} ({inr(topf['overdue'])}, {topf['ageing']} days).",
                     f"{sum(1 for f in od if f['risk'] == 'High')} high-risk accounts; {sum(f['bounces'] for f in od)} cheque bounces in 6 months.",
                     _sum(od, "overdue"), f"{inr(_sum(od, 'overdue'))} overdue", topf["name"], top_cat(fs, False)[0], seg(od),
-                    [src("thermometer", "5. Retailer Credit", f"{len(od)} retailers past credit period"), src("pitch", "SO visits", f"{sum(1 for f in od if f['visit'] and (AS_OF - f['visit']).days <= 30)} visited in 30 days", False)],
-                    "Overdue and ageing come straight from the credit sheet as on 20 Sep.")
+                    [src("thermometer", "5. Retailer Credit", f"{len(od)} retailers past credit period"), src("pitch", "4. Retailer_Master", f"SO last visit: {sum(1 for f in od if f['visit'] and (AS_OF - f['visit']).days <= 30)} visited in 30 days", False)],
+                    f"Overdue and ageing come straight from the credit sheet as on {DATA_LABEL}.", len(od))
             break
     for t in sorted(my_terrs, key=lambda t: -(_sum(org.by_terr[t], "sep_mtd_t") - _sum(org.by_terr[t], "sep"))):
         fs = org.by_terr[t]
         cat, gv = top_cat(fs)
         add_rec(t, "Revenue", f"Push {cat} in {t}: {inr(gv)} behind the phased Sep target.",
                 f"{t} is at {pct(_sum(fs, 'sep'), _sum(fs, 'sep_mtd_t')) or 0:.0f}% of its MTD target with {days_left} days left.",
-                gv, f"{inr(gv)} gap to date", f"{sum(1 for f in fs if f['ach'] is not None and f['ach'] < 0.6)} retailers under 60% of target", cat, seg(fs),
-                [src("thermometer", "8. Actual Sales Value", "Sep MTD by SKU"), src("map", "9. Target Sales Value", "Sep target, phased to the 20th"), src("thermometer", "11. Sep projections", "Gap and run-rate per retailer")],
-                "Actuals and targets are both from the workbook; the gap is phased to the 20th.")
+                gv, f"{inr(gv)} gap to date", f"{len(under60(fs))} retailers under 60% of target", cat, seg(fs),
+                [src("thermometer", "8. Actual Sales Value", "Sep MTD by SKU"), src("map", "9. Target Sales Value", "Sep target, phased to the 20th"), src("thermometer", PROJ, "MTD achievement % per retailer")],
+                "Actuals and targets are both from the workbook; the gap is phased to the 20th.", len(under60(fs)))
         if len(recs) >= 2:
             break
     for t in sorted(my_terrs, key=lambda t: -sum(1 for f in org.by_terr[t] if f["visit"] is None or (AS_OF - f["visit"]).days > 30)):
@@ -461,9 +472,9 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
         if unv:
             add_rec(t, "Coverage", f"Cover {len(unv)} retailers in {t} not visited for 30+ days.",
                     f"{sum(1 for f in unv if f['visit'] is None)} have never had an SO visit; together they carry {inr(_sum(unv, 'sep_t'))} of Sep target.",
-                    _sum(unv, "sep_t") * 0.5, f"{inr(_sum(unv, 'sep_t'))} Sep target uncovered", f"{len(unv)} retailers on the next beat", top_cat(unv, False)[0], seg(unv),
+                    sum(max(0.0, f["sep_t"] - f["sep"]) for f in unv), f"{inr(_sum(unv, 'sep_t'))} Sep target uncovered", f"{len(unv)} retailers on the next beat", top_cat(unv, False)[0], seg(unv),
                     [src("pitch", "4. Retailer_Master", "SO last visit date per retailer"), src("map", "9. Target Sales Value", "Sep target of those retailers", False)],
-                    "Visit dates are the SO's last recorded visit; there's no visit plan in the workbook.")
+                    "Visit dates are the SO's last recorded visit; there's no visit plan in the workbook. Impact is their Sep target not yet billed.", len(unv))
             break
     shorts = [f for f in my if f["short_sku"]]
     if shorts:
@@ -472,18 +483,24 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
         fs = [f for f in shorts if f["terr"] == t]
         add_rec(t, "Stock", f"Get {sk} delivered to {len(fs)} retailers in {t} short-supplied by their distributor.",
                 f"{int(sum(f['short_qty'] for f in fs))} units short across {len(fs)} orders this month.",
-                sum(f["sep"] for f in fs) * 0.1, f"{len(fs)} short-supplied orders", fs[0]["name"], org.sku_cat.get(sk, sk), seg(fs),
-                [src("thermometer", "15. Logistics fulfilment", "Short-supplied SKU and quantity per order")],
-                "Short supply is recorded per order in the logistics sheet.")
+                sum(f["short_qty"] * price_of.get(f["short_sku"], 0.0) for f in fs), f"{len(fs)} short-supplied orders", fs[0]["name"], org.sku_cat.get(sk, sk), seg(fs),
+                [src("thermometer", "15. Logistics fulfilment", "Short-supplied SKU and quantity per order"), src("thermometer", PRODUCTS, "Retailer price per SKU", False)],
+                "Short supply is recorded per order in the logistics sheet; impact is the short units at retailer price.", len(fs))
     mk = org.market.get((org.micro_of_asm[A], "Overall"))
     if mk:
         comps = {k: _n(v) for k, v in mk.items() if k.startswith("Competitor")}
         cname, cval = max(comps.items(), key=lambda kv: kv[1])
         share = _n(mk["Client (LPM)"]) / _n(mk["Market Size (LPM)"]) * 100
+        # the product: the category where the company's share of the micro market is lowest
+        cat_share = {c: _n(r["Client (LPM)"]) / _n(r["Market Size (LPM)"]) for c in CAT_ORDER
+                     if (r := org.market.get((org.micro_of_asm[A], MARKET_CAT[c]))) and _n(r.get("Market Size (LPM)"))}
+        weak_cat = min(cat_share, key=cat_share.get) if cat_share else CAT_ORDER[0]
         add_rec(my_terrs[0], "Pricing", f"{cname.replace(' (LPM)', '')} out-sells us in {org.micro_of_asm[A]}: hold price, push schemes.",
-                f"Company share is {share:.0f}% of market size; {cname.replace(' (LPM)', '')} has {cval / _n(mk['Market Size (LPM)']) * 100:.0f}%.",
-                0.0, f"{share:.0f}% market share", f"Top outlets in {org.micro_of_asm[A]}", "Waterproofing Compound", seg(my),
-                [src("map", "Data 11 - Market Size", "Client vs competitor LPM by micro market")], "Market size is a single estimate per micro market, not invoices.")
+                f"Company share is {share:.0f}% of market size; {cname.replace(' (LPM)', '')} has {cval / _n(mk['Market Size (LPM)']) * 100:.0f}%."
+                + (f" {weak_cat} has the lowest share ({cat_share[weak_cat] * 100:.0f}%)." if cat_share else ""),
+                0.0, f"{share:.0f}% market share", f"Top outlets in {org.micro_of_asm[A]}", weak_cat, seg(my),
+                [src("map", "Data 11 - Market Size", "Client vs competitor LPM by micro market")], "Market size is a single estimate per micro market, not invoices.",
+                sum(1 for f in my if f["cy"][weak_cat][5] > 0))
     # top up to 6 with the next biggest collection / revenue territories
     for t in my_terrs:
         if len(recs) >= 6:
@@ -493,8 +510,8 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
             cat, gv = top_cat(fs)
             if gv > 0:
                 add_rec(t, "Revenue", f"Push {cat} in {t}: {inr(gv)} behind the phased Sep target.", f"{t} is at {pct(_sum(fs, 'sep'), _sum(fs, 'sep_mtd_t')) or 0:.0f}% of its MTD target.",
-                        gv, f"{inr(gv)} gap to date", f"{t} retailers under 60%", cat, seg(fs),
-                        [src("thermometer", "8. Actual Sales Value", "Sep MTD"), src("map", "9. Target Sales Value", "Sep target")], "From workbook actuals and targets.")
+                        gv, f"{inr(gv)} gap to date", f"{len(under60(fs))} retailers under 60% of target", cat, seg(fs),
+                        [src("thermometer", "8. Actual Sales Value", "Sep MTD"), src("map", "9. Target Sales Value", "Sep target")], "From workbook actuals and targets.", len(under60(fs)))
 
     # health cell -> recommendation links
     for r in recs:
@@ -537,8 +554,8 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
                      "body": f"Against the phased target to the 20th it's {pct(my_act, my_mtd) or 0:.0f}%." + (f" The biggest gap is {rr['product']} in {rr['territory']} ({rr['impactLabel']})." if rr else ""),
                      "origin": {"agent": "map", "when": "20 Sep"},
                      "connects": [{"label": "Market Action Plan · September", "target": "map-panel", "agent": "map"}] + ([{"label": "Recommendation #" + str(rr["n"]), "target": rr["id"], "agent": "thermometer"}] if rr else []),
-                     "confidence": conf(score_from(3), "Actuals and targets from the workbook; the projection assumes the current daily run-rate.",
-                                        [src("map", "9. Target Sales Value", "Sep target"), src("thermometer", "8. Actual Sales Value", "Sep MTD to 20th"), src("thermometer", "11. Sep projections", "Required run-rate")])})
+                     "confidence": conf(score_from(2), "Actuals and targets from the workbook; the projection assumes the current daily run-rate.",
+                                        [src("map", "9. Target Sales Value", "Sep target"), src("thermometer", "8. Actual Sales Value", f"Sep MTD to {DATA_LABEL}")])})
     rp = rec_by.get("Pricing")
     if rp:
         insights.append({"id": "ins-competitor", "headline": rp["title"], "body": rp["why"] + " This is a market-size estimate, not invoice prices, so it supports a scheme push rather than a price change.",
@@ -599,6 +616,7 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
     pay30 = [f for f in allf if f["paid_on"] and (AS_OF - f["paid_on"]).days <= 30]
     new_f = [f for f in allf if f["new"]]
     sch = [org.scheme[f["rid"]] for f in allf if f["rid"] in org.scheme]
+    sch_slab = [s for s in sch if str(s.get("Current slab", "")).startswith("Slab")]
 
     def best(fs):
         return region_of[Counter(f["asm"] for f in fs).most_common(1)[0][0]] if fs else "—"
@@ -607,7 +625,8 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
         "rows": [
             {"type": "Payments received (last 30 days)", "actioned": sum(1 for f in allf if f["outstanding"] > 0), "delivered": len(pay30), "value": f"{inr(sum(f['paid'] for f in pay30))} received", "best": best(pay30)},
             {"type": "Q1 loyalty payouts", "actioned": len(paid_q1), "delivered": len(paid_done), "value": f"{inr(sum(_n(f['loy1'].get('Reward in final slab')) for f in paid_done))} paid", "best": best(paid_done)},
-            {"type": "Retailer scheme slabs (Sep)", "actioned": len(sch), "delivered": sum(1 for s in sch if str(s.get("Current slab", "")).startswith("Slab")), "value": f"{inr(sum(_n(s.get('Benefit earned till 20th Sep')) for s in sch))} benefit earned", "best": "Mehsana + Palanpur + Patan" if sch else "—"},
+            {"type": "Retailer scheme slabs (Sep)", "actioned": len(sch), "delivered": len(sch_slab), "value": f"{inr(sum(_n(s.get('Benefit earned till 20th Sep')) for s in sch))} benefit earned",
+             "best": Counter(str(s.get("Micro market")) for s in sch_slab).most_common(1)[0][0] if sch_slab else "—"},
             {"type": "New retailers billed in Sep", "actioned": len(new_f), "delivered": sum(1 for f in new_f if f["sep"] > 0), "value": f"{inr(sum(f['sep'] for f in new_f))} Sep MTD", "best": best([f for f in new_f if f["sep"] > 0])},
         ],
         "takeaway": f"{len(pay30)} retailers paid in the last 30 days; {sum(1 for f in new_f if f['sep'] > 0)} of {len(new_f)} new retailers are already billing in September.",
@@ -629,6 +648,9 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
     worst_od = max(org.asms, key=lambda a: _sum(org.by_asm[a], "overdue"))
     od_fs = sorted([f for f in org.by_asm[worst_od] if f["overdue"] > 0], key=lambda f: -f["overdue"])
     big = od_fs[:3]
+    # 14b: Q1 loyalty payouts approved or processed but not yet paid to these same retailers
+    due_pay = [f for f in big if f["loy1"].get("Payout status") in ("Approved", "Processed") and _n(f["loy1"].get("Reward in final slab")) > 0]
+    pay_src = [src("pitch", LOY1, f"{len(due_pay)} of the top {len(big)} have a Q1 payout approved, not yet paid", False)] if due_pay else []
     add_dec("collection", "Payout holds above ₹2L exposure come to you",
             f"Hold loyalty and scheme payouts for {len(big)} {region_of[worst_od]} retailers until they clear {inr(sum(f['overdue'] for f in big))}?",
             f"{region_of[worst_od]} has {inr(_sum(od_fs, 'overdue'))} overdue across {len(od_fs)} retailers. The top {len(big)} hold {sum(f['overdue'] for f in big) / max(1, _sum(od_fs, 'overdue')) * 100:.0f}% of it.",
@@ -638,9 +660,11 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
              {"id": "b", "label": "Hold all overdue accounts", "outcome": f"Payouts on hold for {len(od_fs)} retailers"},
              {"id": "c", "label": "No hold, keep chasing", "outcome": f"No hold; {worst_od} keeps the recovery calls going"}],
             {"agent": "thermometer", "steps": ["recording your decision", "flagging payouts", f"briefing {worst_od}"], "result": f"Sent to {worst_od}'s Tracker", "link": "View in Tracker"},
-            conf(score_from(2), "Overdue and ageing are from the credit sheet as on 20 Sep.", [src("thermometer", "5. Retailer Credit", f"{len(od_fs)} retailers overdue"), src("pitch", "14b Q1 loyalty payout", "Payouts due", False)]),
-            {"input": {"label": "Credit sheet", "detail": f"{region_of[worst_od]} overdue {inr(_sum(od_fs, 'overdue'))}", "at": "08:00"},
-             "evaluated": [{"agent": "thermometer", "verdict": f"top {len(big)} retailers hold most of the overdue", "chosen": True}, {"agent": "pitch", "verdict": "loyalty payouts are due to some of the same retailers"}],
+            conf(score_from(1 + len(pay_src)), f"Overdue and ageing are from the credit sheet as on {DATA_LABEL}.", [src("thermometer", "5. Retailer Credit", f"{len(od_fs)} retailers overdue")] + pay_src),
+            {"input": {"label": "Credit sheet", "detail": f"{region_of[worst_od]} overdue {inr(_sum(od_fs, 'overdue'))}", "at": DATA_LABEL},
+             "evaluated": [{"agent": "thermometer", "verdict": f"top {len(big)} retailers hold most of the overdue", "chosen": True},
+                           {"agent": "pitch", "verdict": f"Q1 loyalty payouts of {inr(sum(_n(f['loy1'].get('Reward in final slab')) for f in due_pay))} are approved but unpaid for {len(due_pay)} of them"
+                            if due_pay else "none of them has a Q1 loyalty payout pending"}],
              "why": "Holding payouts for the largest accounts covers most of the exposure. Holds above ₹2L are above your threshold.", "outcome": f"Suggested: hold payouts for the top {len(big)}", "link": "View the credit sheet"},
             round(L(sum(f["overdue"] for f in big)), 1), inr(sum(f["overdue"] for f in big)))
 
@@ -661,7 +685,8 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
                 {"input": {"label": "Credit sheet", "detail": f"{len(over)} retailers above 150% utilisation", "at": "08:00"},
                  "evaluated": [{"agent": "thermometer", "verdict": f"{len(ov)} in {region_of[oa]}", "chosen": True}],
                  "why": "Selling more on credit past the limit raises exposure further; the credit threshold sends this to you.", "outcome": "Suggested: advance payment only", "link": "View the retailers"},
-                45, f"{max(f['util'] for f in ov) * 100:.0f}%")
+                # where it sits on the credit-period scale: the longest credit period these retailers are on (5. Retailer Credit)
+                max(f["credit_days"] for f in ov), f"{max(f['credit_days'] for f in ov)} days")
 
     so_unv = Counter(f["so"] for f in allf if f["visit"] is None or (AS_OF - f["visit"]).days > 30)
     if so_unv:
@@ -918,7 +943,9 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
         "cortexHome": {
             "AGENT_STATS": AGENT_STATS, "VIEWER": VIEWER,
             "TODAY_LABEL": f"{WD[TODAY.weekday()]}, {TODAY.day} September {TODAY.year}", "SYNC_LABEL": "Excel data as of 20 Sep 2026",
-            "TERRITORIES": my_terrs, "DAYS_LEFT": days_left, "DATA_DAY": AS_OF.day,
+            "TERRITORIES": my_terrs, "DAYS_LEFT": days_left, "DATA_DAY": AS_OF.day, "DATA_AS_OF": AS_OF.isoformat(),
+            # the confidence rule the web app applies to scores it computes itself (see score_from / conf)
+            "CONF_RULE": {"base": 58, "perSheet": 9, "max": 92, "freshness": FRESHNESS, "dataLabel": DATA_LABEL},
             "INSIGHTS_SUMMARY": INSIGHTS_SUMMARY, "INSIGHTS": insights, "WEEK_DAYS": WEEK_DAYS, "TRACKER": TRACKER,
             "SIGNAL_COUNTS": SIGNAL_COUNTS, "RECOMMENDATIONS": recs,
             "HEAD_REC_STATUS": {r["id"]: {"owner": A, "state": "Awaiting decision"} for r in recs},
@@ -951,6 +978,10 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
             "AS_OF": {"day": AS_OF.day, "days": MONTH_DAYS, "label": "20 Sep 2026"}, "SYNC_NOTE": "From the Excel workbook · data to 20 Sep 2026",
             "CATEGORY_PACKS": CATEGORY_PACKS, "CPS": cps, "BDES": BDES, "LEADS": [], "LEVERS": LEVERS, "SCHEME_REWARDS": SCHEME_REWARDS,
             "ASM_NAME": A,
+            # Huddle sheet themes about competitors and partners switching, quoted as evidence by the recommendations
+            "HUDDLE_SIGNALS": [{"n": int(_n(h.get("#"))), "theme": str(h["Theme"]).strip(), "urgency": h.get("Urgency"), "session": h.get("Huddle"),
+                                "switching": bool(re.search(r"switch", str(h["Theme"]), re.I))}
+                               for h in org.huddle if re.search(r"switch|competitor", str(h["Theme"]), re.I)],
         },
         "actionTraces": {"REC_SUGGESTED": REC_SUGGESTED, "ACTION_TRACES": ACTION_TRACES},
         "data_gaps": DATA_GAPS + web_plan.PLAN_GAPS + web_huddle.HUDDLE_GAPS,
@@ -974,7 +1005,9 @@ def thermo_partners(org: _Org, region_of: dict[str, str]) -> list[dict[str, Any]
         avg = sum(sum(row[:5]) for row in cy) / 5
         out.append({"code": code, "name": f["name"], "type": "dealer" if f["type"] == "Cement-Steel Dealer" else "retailer",
                     "region": region_of[f["asm"]], "asm": f["asm"], "territory": f["terr"],
-                    "appt": f["onboarded"].isoformat() if f["onboarded"] else "2020-01-01", "isNew": f["new"], "operating": True,
+                    # Onboarded On and SO Last visit date (4. Retailer_Master); null when the sheet says "Not applicable"
+                    "appt": f["onboarded"].isoformat() if f["onboarded"] else None, "lastVisit": f["visit"].isoformat() if f["visit"] else None,
+                    "isNew": f["new"], "operating": True,
                     "lyAvg": round(avg, 5), "cy": cy, "tgt": tg})
         d = dist_acc.setdefault(f["dist_id"], {"name": f["dist"], "asm": Counter(), "terr": Counter(), "cy": [[0.0] * 12 for _ in CAT_ORDER], "tg": [[0.0] * 12 for _ in CAT_ORDER], "n": 0})
         d["asm"][f["asm"]] += 1
@@ -988,7 +1021,8 @@ def thermo_partners(org: _Org, region_of: dict[str, str]) -> list[dict[str, Any]
         a = d["asm"].most_common(1)[0][0]
         avg = sum(sum(row[:5]) for row in d["cy"]) / 5
         out.append({"code": f"D{did}", "name": d["name"], "type": "distributor", "region": region_of[a], "asm": a, "territory": d["terr"].most_common(1)[0][0],
-                    "appt": "2020-01-01", "isNew": False, "operating": True, "lyAvg": round(avg, 5),
+                    # the workbook has no appointment date for these distributors (MAP_Distributor Assessment lists a different set)
+                    "appt": None, "lastVisit": None, "isNew": False, "operating": True, "lyAvg": round(avg, 5),
                     "cy": [[round(v, 5) for v in row] for row in d["cy"]], "tgt": [[round(v, 5) for v in row] for row in d["tg"]], "linkedRetailers": d["n"]})
     return out
 

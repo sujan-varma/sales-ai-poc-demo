@@ -11,7 +11,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight, Flag, Info, ListChecks, MessageSquare, Pencil, Share2, Sparkles, UserPlus, X } from "lucide-react";
 import { AGENTS, AgentId } from "@/data/cortexHome";
-import { BAND_COLOR, CATEGORIES, CONSIDER, OCT_DRAFT, OCT_PLAN, Priority, SALES_EXECS, TERRITORIES, REGION_SHARE, TERRITORY_SHARE, Territory, draftTrace, studioAnswer, MAP_LABELS, WEAKEST_TERRITORY } from "@/data/map";
+import { BAND_COLOR, CATEGORIES, CONSIDER, OCT_DRAFT, OCT_PLAN, Priority, SALES_EXECS, TERRITORIES, REGION_SHARE, TERRITORY_SHARE, Territory, draftTrace, studioAnswer, MAP_LABELS, WEAKEST_TERRITORY, STUDIO_SOURCES } from "@/data/map";
 import { AgentRunChip } from "../agentRun";
 import { TraceTooltip } from "../actionTrace";
 import { AiTag } from "../ai";
@@ -29,11 +29,12 @@ type Msg = { id: number; from: "you" | "ai"; text: string };
 type Canvas = "empty" | "generating" | "draft" | "saving" | "closed";
 
 /** The generation sequence: visibly collating across the agents, ~13 s, before the plan appears. */
+const plural = (k: number, one: string, many = `${one}s`) => `${k} ${k === 1 ? one : many}`;
 const GEN_STEPS: { agent: AgentId | "tracker"; label: string; detail: string }[] = [
-  { agent: "huddle", label: "Huddle", detail: "Reading 26 huddles and review calls from September" },
+  { agent: "huddle", label: "Huddle", detail: `Reading ${plural(STUDIO_SOURCES.huddleThemes, "huddle theme")} from the Huddle sheet` },
   { agent: "thermometer", label: "Thermometer", detail: `Pulling scorecard and category signals for ${TERRITORIES.length} territories` },
-  { agent: "pitch", label: "Pitch", detail: "Reading 214 visit logs, objections and competitor mentions" },
-  { agent: "tracker", label: "Action Tracker", detail: "Carrying 9 open tickets and 3 unfinished initiatives" },
+  { agent: "pitch", label: "Pitch", detail: `Reading SO visits: ${plural(STUDIO_SOURCES.visitsThisMonth, "retailer")} visited this month` },
+  { agent: "tracker", label: "Action Tracker", detail: `Carrying ${plural(STUDIO_SOURCES.openTickets, "open ticket")} and ${plural(STUDIO_SOURCES.openInitiatives, "unfinished initiative")}` },
   { agent: "map", label: "Market Action Plan", detail: `Sizing impact and drafting ${OCT_DRAFT.length} initiatives across ${TERRITORIES.length} territories` },
 ];
 const GEN_STEP_MS = 2600;

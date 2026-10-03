@@ -52,6 +52,11 @@ APP_KIND = {"collection": "collection", "credit": "credit_limit", "gap": "target
 WEB_KIND = {v: k for k, v in APP_KIND.items()}
 REACH_TARGET = 0.7
 
+
+def _conf(n_sheets: int) -> int:
+    """Talking-point confidence, the same rule as web_data.score_from: 58 plus 9 per workbook sheet behind it, at most 92."""
+    return min(92, 58 + 9 * n_sheets)
+
 PLAN_GAPS = [
     {"area": "Plan versions, locks and ASM targets",
      "detail": "No plan records. The September plan is built from workbook signals as v1; Agreed equals the AI Estimated figure because there are no ASM targets."},
@@ -402,14 +407,14 @@ def build(wb: Workbook, org: Any, ctx: dict[str, Any]) -> dict[str, Any]:
             top_col = max(DIST_CAT, key=lambda c: _n(r.get(c)))
             return [
                 {"topic": "Company introduction", "point": "Skip the full introduction; confirm who places orders now.", "why": f"Appointed in {appt}." if appt else "Active distributor.",
-                 "logic": "Active distributor.", "evidence": f"{DIST_SHEET} · {o['code']}", "conf": 93},
+                 "logic": "Active distributor.", "evidence": f"{DIST_SHEET} · {o['code']}", "conf": _conf(1)},
                 {"topic": "Outstanding", "point": f"Ask for clearance of {inr(od)} overdue across its retailers before the next order." if od else "No overdue at its retailers; confirm the next payment date.",
                  "why": f"{sum(1 for f in fs if f['overdue'] > 0)} of its {len(fs)} retailers are past their credit period." if od else "Retailer credit is within terms.",
-                 "logic": f"Overdue {inr(od)}.", "evidence": "5. Retailer Credit", "conf": 95},
+                 "logic": f"Overdue {inr(od)}.", "evidence": "5. Retailer Credit", "conf": _conf(2)},
                 {"topic": "Sell top seller", "point": f"Hold the {DIST_CAT[top_col]} order rhythm; it's the largest share of its sales.",
-                 "why": f"{_n(r.get(top_col)) * 100:.0f}% of its secondary sales.", "logic": "Category mix, last quarter.", "evidence": f"{DIST_SHEET} · category %", "conf": 84},
+                 "why": f"{_n(r.get(top_col)) * 100:.0f}% of its secondary sales.", "logic": "Category mix, last quarter.", "evidence": f"{DIST_SHEET} · category %", "conf": _conf(1)},
                 {"topic": "Target", "point": "Agree this week's order to recover the June level.", "why": f"{inr(aug)} in August against {inr(jun)} in June.", "logic": f"{(aug - jun) / jun * 100:+.0f}% Jun→Aug." if jun else "—",
-                 "evidence": f"{DIST_SHEET} · monthly sales", "conf": 88},
+                 "evidence": f"{DIST_SHEET} · monthly sales", "conf": _conf(1)},
                 {"topic": "Loyalty", "point": "No loyalty topic for a distributor.", "why": "The loyalty programme covers retailers only.", "logic": "Not applicable.", "evidence": "14a. Loyalty program structure", "conf": None},
             ]
         f = by_name.get(name)
@@ -420,28 +425,28 @@ def build(wb: Workbook, org: Any, ctx: dict[str, Any]) -> dict[str, Any]:
         out = [{"topic": "Company introduction",
                 "point": "Skip the full introduction; confirm who places orders now." if not f["new"] else "Introduce the company and the waterproofing range; leave the category brochure.",
                 "why": f"Onboarded {f['onboarded'].strftime('%b %Y')}." if f["onboarded"] else ("New retailer." if f["new"] else "Active retailer."),
-                "logic": "New account." if f["new"] else "Active account.", "evidence": f"4. Retailer_Master · {f['rid']}", "conf": 93},
+                "logic": "New account." if f["new"] else "Active account.", "evidence": f"4. Retailer_Master · {f['rid']}", "conf": _conf(1)},
                {"topic": "Outstanding",
                 "point": f"Ask for clearance of {inr(f['overdue'])} overdue before booking a new order." if f["overdue"] > 0 else "No overdue; confirm the next payment date.",
                 "why": f"{inr(f['overdue'])} is {f['ageing']} days past the credit period (risk: {f['risk'] or 'none'})." if f["overdue"] > 0 else f"{inr(f['outstanding'])} outstanding, within terms.",
-                "logic": f"Outstanding {inr(f['outstanding'])}, limit {inr(f['limit'])}.", "evidence": "5. Retailer Credit", "conf": 96 if f["overdue"] > 0 else 90}]
+                "logic": f"Outstanding {inr(f['outstanding'])}, limit {inr(f['limit'])}.", "evidence": "5. Retailer Credit", "conf": _conf(1)}]
         if gaps:
             n_, pk, g = gaps[0]
             out.append({"topic": "Sell top seller", "point": f"Push {n_} {pk}: {int(g)} units short of the September target.",
-                        "why": f"The largest SKU gap at this counter; {len(gaps)} SKUs are behind.", "logic": f"Gap {int(g)} units.", "evidence": f"{PROJ} · Gap / SKU", "conf": 84})
+                        "why": f"The largest SKU gap at this counter; {len(gaps)} SKUs are behind.", "logic": f"Gap {int(g)} units.", "evidence": f"{PROJ} · Gap / SKU", "conf": _conf(1)})
         if f["ach"] is not None:
             rr = _n(pr.get("Sales qty RR required per day in remaning days of Sep to achieve target / Total"))
             out.append({"topic": "Target", "point": "Agree this week's order to stay on track for the monthly plan.", "why": f"{f['ach'] * 100:.0f}% of the September target to the 20th.",
-                        "logic": f"{inr(f['sep'])} Sep MTD; {rr:.0f} units a day needed.", "evidence": f"{PROJ} · MTD achievement", "conf": 88})
+                        "logic": f"{inr(f['sep'])} Sep MTD; {rr:.0f} units a day needed.", "evidence": f"{PROJ} · MTD achievement", "conf": _conf(1)})
         l2 = f["loy2"]
         if l2.get("Pitch statement"):
             out.append({"topic": "Loyalty", "point": str(l2["Pitch statement"]), "why": f"Current slab {l2.get('Current slab')}; next {l2.get('Next eligible slab')}.",
-                        "logic": f"{int(_n(l2.get('Additional qty sale required in sep to reach next slab')))} more packs to the next slab.", "evidence": "14c Q2 loyalty performance", "conf": 77})
+                        "logic": f"{int(_n(l2.get('Additional qty sale required in sep to reach next slab')))} more packs to the next slab.", "evidence": "14c Q2 loyalty performance", "conf": _conf(1)})
         else:
             out.append({"topic": "Loyalty", "point": "No loyalty step this month.", "why": "No slab move within reach.", "logic": "Not applicable.", "evidence": "14c Q2 loyalty performance", "conf": None})
         if f["short_sku"]:
             out.append({"topic": "Maintain & grow", "point": f"Confirm when the {int(f['short_qty'])} units of {f['short_sku']} short on {f['order_id']} will arrive.",
-                        "why": f"The distributor short-supplied order {f['order_id']} on {_dm(f['order_date'])}.", "logic": "Short supply, Sep.", "evidence": "15. Logistics fulfilment", "conf": 86})
+                        "why": f"The distributor short-supplied order {f['order_id']} on {_dm(f['order_date'])}.", "logic": "Short supply, Sep.", "evidence": "15. Logistics fulfilment", "conf": _conf(1)})
         return out
 
     # the Thermometer route: the Coverage recommendation's top unvisited retailer gets a pitch of its own
@@ -454,7 +459,7 @@ def build(wb: Workbook, org: Any, ctx: dict[str, Any]) -> dict[str, Any]:
             thermo = {"outlet": outlet(f), "rec": route_rec["id"], "label": f"Thermometer recommendation #{route_rec['n']} · {route_rec['signal']}",
                       "point": {"topic": "Open issues", "point": "Book the first visit of the quarter and take an opening order.",
                                 "why": f"No SO visit since {_dm(f['visit'])}." if f["visit"] else "Never visited by an SO.",
-                                "logic": f"{inr(f['sep_t'])} September target.", "evidence": f"Thermometer · recommendation #{route_rec['n']}", "conf": 83}}
+                                "logic": f"{inr(f['sep_t'])} September target.", "evidence": f"Thermometer · recommendation #{route_rec['n']} · 4. Retailer_Master", "conf": _conf(2)}}
 
     main_so = execs[0]["name"] if execs else ""
     route = sorted([f for f in my if f["so"] == main_so], key=lambda f: (f["visit"] or dt.date(2000, 1, 1)))[:3]
@@ -551,6 +556,15 @@ def build(wb: Workbook, org: Any, ctx: dict[str, Any]) -> dict[str, Any]:
 
     TRACKER = {"LABELS": labels, "ASM_TICKETS": tickets, "OTHER_ASM_TICKETS": other, "HEAD_ASMS": list(org.asms),
                "SE_NAMES": sorted({f["so"] for f in org.facts}), "OCT_TICKET_BASE": 2410}
+
+    # what MAP Studio reads before it drafts October: counted from the workbook and the tracker above
+    month_start = AS_OF.replace(day=1)
+    STUDIO["sources"] = {
+        "huddleThemes": len(org.huddle),
+        "visitsThisMonth": sum(1 for f in my if f["visit"] and f["visit"] >= month_start),
+        "openTickets": sum(1 for t in tickets if t["column"] != "closed"),
+        "openInitiatives": sum(1 for x in SEP_INITIATIVES if x["status"] != "closed"),
+    }
 
     # ---- the Head of Sales orchestration story (latest sync on the data day)
     def story(fs: list[dict], where: str, sid: str, start: str, end: str, rescore: Optional[str], asm_name: Optional[str]) -> dict[str, Any]:

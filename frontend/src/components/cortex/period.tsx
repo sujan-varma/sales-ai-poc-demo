@@ -7,7 +7,7 @@
 import React, { useEffect, useState } from "react";
 import { CalendarDays, Check, ChevronDown } from "lucide-react";
 import { useOutside } from "./shell";
-import { DATA_DAY } from "@/data/cortexHome";
+import { DATA_AS_OF, DATA_DAY } from "@/data/cortexHome";
 
 export type PeriodKind = "fy" | "quarter" | "month" | "prev-month" | "prev-week" | "custom";
 export interface Period {
@@ -113,8 +113,9 @@ export function usePeriod(): [Period, (p: Period) => void] {
 export function PeriodFilter({ align = "right" }: { align?: "left" | "right" }) {
   const [p, set] = usePeriod();
   const [open, setOpen] = useState(false);
-  const [from, setFrom] = useState("2026-09-01");
-  const [to, setTo] = useState("2026-09-29");
+  // the range stops at the workbook's data date: there are no figures after it
+  const [from, setFrom] = useState(`${DATA_AS_OF.slice(0, 8)}01`);
+  const [to, setTo] = useState(DATA_AS_OF);
   const ref = useOutside<HTMLDivElement>(open, () => setOpen(false));
   const valid = from && to && from <= to;
   return (
@@ -168,7 +169,7 @@ export function PeriodFilter({ align = "right" }: { align?: "left" | "right" }) 
                   <input
                     type="date"
                     min="2026-04-01"
-                    max="2026-09-29"
+                    max={DATA_AS_OF}
                     value={v as string}
                     onChange={(e) => (setV as (s: string) => void)(e.target.value)}
                     className="mt-0.5 h-8 w-full rounded-md border border-cx-strong bg-cx-bg px-1.5 font-data text-[11.5px] text-cx-text focus:border-[#2f6fed]/70 focus:outline-none"

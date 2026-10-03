@@ -2,7 +2,7 @@
 // colouring), the initiative KPI tables, and the recommendations Sales AI derives from them.
 // Pure functions over src/data/thermometer.ts; the tabs only render what comes back.
 
-import { AgentId, Confidence, RecRoute } from "@/data/cortexHome";
+import { Confidence, DATA_AS_OF, EvidenceSource, RecRoute, confFromSources, sheetSrc } from "@/data/cortexHome";
 import { ActionTrace } from "@/data/actionTraces";
 import {
   AS_OF,
@@ -15,6 +15,7 @@ import {
   ChannelPartner,
   EXPECTED_TODAY,
   FY_MONTHS,
+  HUDDLE_SIGNALS,
   LEVERS,
   Rag3,
   RETAILER_BANDS,
@@ -38,10 +39,14 @@ export const cpsIn = (territories: string[], type?: ChannelPartner["type"] | Cha
   const types = type ? (Array.isArray(type) ? type : [type]) : null;
   return CPS.filter((c) => set.has(c.territory) && (!types || types.includes(c.type)));
 };
+/** FY month index of the appointment (Apr 2026 = 0); no date in the workbook counts as appointed before this FY */
 const apptIdx = (c: ChannelPartner) => {
+  if (!c.appt) return -1;
   const [y, m] = c.appt.split("-").map(Number);
   return (y - 2026) * 12 + (m - 4);
 };
+/** partners the SO visited on or after a date ("YYYY-MM-DD"), from 4. Retailer_Master's last visit date */
+const visitedSince = (cs: ChannelPartner[], iso: string) => cs.filter((c) => c.lastVisit && c.lastVisit >= iso).length;
 /** months from the appointment month through the last completed month (Aug) */
 export function activeMonths(c: ChannelPartner) {
   const s = Math.max(0, apptIdx(c));
@@ -578,10 +583,13 @@ export interface ThermoRec {
   trace: ActionTrace;
 }
 
-const src = (agent: AgentId, title: string, detail: string, when: string, ageHours: number, independent = true) => ({ agent, title, detail, when, ageHours, independent });
-function conf(score: number, rationale: string, sources: ReturnType<typeof src>[]): Confidence {
-  return { score, rationale, factors: { corroboration: Math.min(0.95, score / 100 + 0.03), freshness: 0.9, reliability: Math.min(0.95, score / 100) }, sources, rescoredAt: "08:00" };
-}
+// Every source is a workbook sheet; the score is the backend's rule (base + per sheet), so it moves with the evidence.
+const src = sheetSrc;
+const conf = (rationale: string, sources: EvidenceSource[]): Confidence => confFromSources(rationale, sources);
+/** first day of the data month, "YYYY-MM-01", and its label ("1 Sep") */
+const MONTH_START = `${DATA_AS_OF.slice(0, 8)}01`;
+const MONTH_START_LABEL = `1 ${FY_MONTHS[CUR]}`;
+const inMonth = (c: ChannelPartner, fyIdx: number) => !!c.appt && apptIdx(c) === fyIdx;
 
 /** worst territory in scope by a metric (lowest first) */
 function worst<T>(t: string[], f: (x: string) => T | null, key: (v: T) => number) {
@@ -608,31 +616,35 @@ export function buildRecs(persona: ThermoPersona): ThermoRec[] {
   if (prod) {
     const { c, a } = prod.v;
     const gap = Math.max(0, a.tgt - a.sales);
-    const dealers = cpsIn([prod.x], "dealer").filter((d) => cpValue(d, "cy", H1, c.id) < cpValue(d, "tgt", H1, c.id) * 0.7).length;
+    // dealers and retailers under 70% of their own plan for the category, and how many the SOs visited this month
+    const slow = cpsIn([prod.x], ["dealer", "retailer"]).filter((d) => cpValue(d, "cy", H1, c.id) < cpValue(d, "tgt", H1, c.id) * 0.7);
+    const dealers = slow.length;
+    const visited = visitedSince(slow, MONTH_START);
+    const who = dealers === 1 ? "1 partner" : `${dealers} partners`;
     add({
       id: "tr-prod",
       priority: a.pct! < 75 ? "High" : "Medium",
       title: `Recover the ${c.name} gap in ${prod.x}`,
-      evidence: `${c.name} in ${prod.x} is at ${a.pct!.toFixed(0)}% of plan for Apr–Sep: ${fmtL(a.sales)} of ${fmtL(a.tgt)}, ${fmtL(gap)} short. ${dealers} dealers are under 70% of their own plan.`,
-      action: `Put ${c.name} on the next two beats for the ${dealers} slow dealers, with a trial-pack scheme.`,
-      upliftL: gap * 0.5,
+      evidence: `${c.name} in ${prod.x} is at ${a.pct!.toFixed(0)}% of plan for Apr–Sep: ${fmtL(a.sales)} of ${fmtL(a.tgt)}, ${fmtL(gap)} short. ${dealers ? `${who} (dealers and retailers) are under 70% of their own plan; ${visited} of them have had an SO visit since ${MONTH_START_LABEL}.` : "No single partner is under 70% of its own plan; the gap is spread across the territory."}`,
+      action: dealers ? `Put ${c.name} on the next two beats for the ${who} behind plan, with a trial-pack scheme.` : `Put ${c.name} on the next two beats across ${prod.x}, with a trial-pack scheme.`,
+      upliftL: gap,
       territory: prod.x,
       lever: { label: "Product deep dive", link: { kind: "deep", tab: "product", cat: c.id } },
       route: "pitch",
-      confidence: conf(82, `Plan vs actual is from DMS invoices through ${AS_OF.label}; the dealer split is direct. Visit logs agree the gap is distribution, not demand.`, [
-        src("thermometer", "DMS invoices", `${prod.x} · ${c.name}, Apr–Sep`, "08:00 today", 3),
-        src("map", "September plan", `${prod.x} category targets`, "08:00 today", 3, false),
-        src("pitch", "Visit logs", `${dealers + 4} visits since 1 Sep`, "since 1 Sep", 300),
+      confidence: conf(`Plan vs actual is from the workbook's sales and target sheets through ${AS_OF.label}; the partner split is direct. Visits are each partner's last SO visit.`, [
+        src("thermometer", "8. Actual Sales Value", `${prod.x} · ${c.name}, Apr–Sep`),
+        src("map", "9. Target Sales Value", `${prod.x} category targets`),
+        src("pitch", "4. Retailer_Master", `${visited} of ${who} behind plan visited since ${MONTH_START_LABEL} (SO last visit)`, false),
       ]),
       trace: {
-        input: { label: "Thermometer product signal", detail: `${prod.x} · ${c.name} at ${a.pct!.toFixed(0)}% of H1 plan`, at: "08:00" },
+        input: { label: "Thermometer product signal", detail: `${prod.x} · ${c.name} at ${a.pct!.toFixed(0)}% of H1 plan`, at: AS_OF.label },
         evaluated: [
-          { agent: "thermometer", verdict: `${dealers} dealers carry most of the shortfall` },
-          { agent: "map", verdict: "already in the October draft as a watch item" },
-          { agent: "pitch", verdict: "a trial-pack pitch fits these dealers' last orders", chosen: true },
+          { agent: "thermometer", verdict: dealers ? `${who} carry most of the shortfall` : "the shortfall is spread across the territory" },
+          { agent: "map", verdict: `the ${c.name} target is already in the September plan` },
+          { agent: "pitch", verdict: dealers ? `${dealers - visited} of them have had no SO visit since ${MONTH_START_LABEL}` : `the next beats can carry ${c.name}`, chosen: true },
         ],
-        why: "The gap sits with a named set of dealers who stopped reordering, so the fastest lever is the next visit, not a new plan line.",
-        outcome: `Prioritised ${c.name} for ${dealers} dealers on ${prod.x}'s next beats`,
+        why: "The gap sits with partners already on the beat, so the fastest lever is the next visit, not a new plan line.",
+        outcome: dealers ? `Prioritised ${c.name} for ${who} on ${prod.x}'s next beats` : `Prioritised ${c.name} on ${prod.x}'s next beats`,
         link: "View pitch",
       },
     });
@@ -649,8 +661,10 @@ export function buildRecs(persona: ThermoPersona): ThermoRec[] {
     },
     (v) => -v.pct
   );
-  if (dg) {
+  // (no last-year sales in the workbook, so this only fires once LY data exists)
+  if (dg && dg.v.n > 0) {
     const thr = DEGROW_MAX[CUR - 1];
+    const switching = HUDDLE_SIGNALS.find((h) => h.switching);
     add({
       id: "tr-degrow",
       priority: dg.v.pct > thr ? "High" : "Medium",
@@ -661,12 +675,12 @@ export function buildRecs(persona: ThermoPersona): ThermoRec[] {
       territory: dg.x,
       lever: { label: "De-growing partner recovery", link: { kind: "initiative", id: "degrow" } },
       route: "tracker",
-      confidence: conf(78, "De-growth is computed per partner from DMS (Apr–Aug average vs last year ÷ 12), so the list is exact; whether a call recovers them is the uncertain part.", [
-        src("thermometer", "DMS sales, two years", `${dg.v.den} partners in ${dg.x}`, "08:00 today", 3),
-        src("huddle", "Morning huddle", "Two partners named as switching", "09:10 today", 2),
+      confidence: conf("De-growth is computed per partner (Apr–Aug average vs last year ÷ 12), so the list is exact; whether a call recovers them is the uncertain part.", [
+        src("thermometer", "8. Actual Sales Value", `${dg.v.den} partners in ${dg.x}`),
+        ...(switching ? [src("huddle", "Huddle", `#${switching.n} · ${switching.theme}${switching.urgency ? ` (urgency ${switching.urgency})` : ""}`, false)] : []),
       ]),
       trace: {
-        input: { label: "De-growth check, monthly", detail: `${dg.x} · ${dg.v.n} partners below LY`, at: "08:00" },
+        input: { label: "De-growth check, monthly", detail: `${dg.x} · ${dg.v.n} partners below LY`, at: AS_OF.label },
         evaluated: [
           { agent: "thermometer", verdict: "named partners with an owner each: work for the Tracker", chosen: true },
           { agent: "map", verdict: "not a plan change; the target already holds" },
@@ -689,28 +703,35 @@ export function buildRecs(persona: ThermoPersona): ThermoRec[] {
   );
   if (nd && nd.v.pct < 100) {
     const d = nd.v.d;
+    const silent = d.list.filter((c) => !(sep(c) > 0 || cpValue(c, "cy", [CUR - 1]) > 0));
+    const lastMonth = FY_MONTHS[CUR - 1];
+    const late = silent.filter((c) => inMonth(c, CUR - 1)).length;
+    const seen = visitedSince(silent, MONTH_START);
     add({
       id: "tr-dealers",
       priority: nd.v.pct < 60 ? "High" : "Medium",
       title: `Activate the new dealers in ${nd.x}`,
-      evidence: `${d.add - d.billed2} of ${nd.x}'s ${d.add} dealers appointed since November haven't billed in August or September. Average throughput is ${d.thru == null ? "NA" : fmtL(d.thru)} a month, against the ₹40k guideline.`,
-      action: "Book a first order with each silent dealer through their distributor before 15 Oct.",
-      upliftL: (d.add - d.billed2) * VALUE_GUIDE.dealer,
+      evidence: `${silent.length} of ${nd.x}'s ${d.add} new dealers haven't billed in ${lastMonth} or ${FY_MONTHS[CUR]}. Average throughput is ${d.thru == null ? "NA" : fmtL(d.thru)} a month, against the ${fmtL(VALUE_GUIDE.dealer)} guideline.`,
+      action: `Book a first order with each silent dealer through their distributor by the 15th of ${FY_MONTHS[CUR + 1]}.`,
+      upliftL: silent.length * VALUE_GUIDE.dealer,
       territory: nd.x,
       lever: { label: "Dealer expansion", link: { kind: "initiative", id: "dealer-exp", kpi: "billing2" } },
       route: "tracker",
-      confidence: conf(74, "Billing comes from DMS. Two of the dealers were appointed late in August, so a slow start is partly expected.", [
-        src("thermometer", "DMS billing", `${d.add} dealers appointed since Nov`, "08:00 today", 3),
-        src("pitch", "Visit logs", "3 onboarding visits", "since 15 Aug", 1080),
-      ]),
+      confidence: conf(
+        `Billing is from the workbook's sales sheet; appointment and visit dates from the retailer master.${late ? ` ${late} of the silent dealers were onboarded in ${lastMonth}, so a slow start is partly expected.` : ""}`,
+        [
+          src("thermometer", "8. Actual Sales Value", `${d.add} new dealers · ${lastMonth}–${FY_MONTHS[CUR]} billing`),
+          src("pitch", "4. Retailer_Master", `${seen} of the ${silent.length} silent dealers visited since ${MONTH_START_LABEL}; ${late} onboarded in ${lastMonth}`),
+        ]
+      ),
       trace: {
-        input: { label: "Expansion check", detail: `${nd.x} · ${d.add - d.billed2} silent new dealers`, at: "08:00" },
+        input: { label: "Expansion check", detail: `${nd.x} · ${silent.length} silent new dealers`, at: AS_OF.label },
         evaluated: [
           { agent: "thermometer", verdict: "first orders need an owner and a date", chosen: true },
-          { agent: "pitch", verdict: "onboarding pitch already used on these dealers" },
+          { agent: "pitch", verdict: `${seen} of them have had an SO visit since ${MONTH_START_LABEL}` },
         ],
         why: "The dealers are appointed but inactive; a booked first order is a task, so it went to the Tracker.",
-        outcome: `${d.add - d.billed2} first-order actions in ${asmOf(nd.x)}'s Tracker`,
+        outcome: `${silent.length} first-order actions in ${asmOf(nd.x)}'s Tracker`,
         link: "View in Tracker",
       },
     });
@@ -724,18 +745,18 @@ export function buildRecs(persona: ThermoPersona): ThermoRec[] {
       id: "tr-nontrade",
       priority: ntw.v < 75 ? "High" : "Medium",
       title: `Rebuild the Non-Trade pipeline in ${ntw.x}`,
-      evidence: `Project sales in ${ntw.x} are at ${ntw.v.toFixed(0)}% of plan for Apr–Sep (${fmtL(a.sales)} of ${fmtL(a.tgt)}). Hot leads cover less of the next three months than the 6× pipeline rule asks for.`,
-      action: "Add two builder meets to the October plan and move the warm leads into named follow-ups.",
-      upliftL: Math.max(0, a.tgt - a.sales) * 0.4,
+      evidence: `Project sales in ${ntw.x} are at ${ntw.v.toFixed(0)}% of plan for Apr–Sep (${fmtL(a.sales)} of ${fmtL(a.tgt)}).`,
+      action: `Add two builder meets to the ${FY_MONTHS[CUR + 1]} plan and move the open project leads into named follow-ups.`,
+      upliftL: Math.max(0, a.tgt - a.sales),
       territory: ntw.x,
       lever: { label: "Non-Trade deep dive", link: { kind: "deep", tab: "nontrade" } },
       route: "map",
-      confidence: conf(70, "Sales are exact; the pipeline view depends on how current the lead stages in LMS are.", [
-        src("thermometer", "Project invoices", `${ntw.x}, Apr–Sep`, "08:00 today", 3),
-        src("map", "October draft", "No Non-Trade initiative yet", "08:00 today", 3, false),
+      confidence: conf("Sales and targets are exact; the workbook has no lead pipeline.", [
+        src("thermometer", "8. Actual Sales Value", `${ntw.x}, Apr–Sep`),
+        src("map", "9. Target Sales Value", `${ntw.x}, Apr–Sep`),
       ]),
       trace: {
-        input: { label: "Non-Trade pacing", detail: `${ntw.x} · ${ntw.v.toFixed(0)}% of H1 plan`, at: "08:00" },
+        input: { label: "Non-Trade pacing", detail: `${ntw.x} · ${ntw.v.toFixed(0)}% of H1 plan`, at: AS_OF.label },
         evaluated: [
           { agent: "map", verdict: "a builder-meet initiative fits the October plan", chosen: true },
           { agent: "thermometer", verdict: "not one named action; a month of activity" },
@@ -751,19 +772,24 @@ export function buildRecs(persona: ThermoPersona): ThermoRec[] {
   const bp = worst(t, (x) => bpOf([x], "retailer").pct, (v) => v);
   if (bp && bp.v < 85) {
     const b = bpOf([bp.x], "retailer");
+    // what one more billing retailer is worth: the average Sep sale of those that billed
+    const billed = cpsIn([bp.x], "retailer").filter((c) => c.operating && sep(c) > 0);
+    const avgSale = billed.length ? billed.reduce((s, c) => s + sep(c), 0) / billed.length : 0;
     add({
       id: "tr-bp",
       priority: bp.v < 70 ? "Medium" : "Low",
       title: `Lift retailer billing in ${bp.x}`,
       evidence: `${b.billing} of ${b.active} active retailers in ${bp.x} have billed this month, against ${Math.round(b.billTarget)} expected by now (${bp.v.toFixed(0)}% of target participation).`,
       action: "Route the non-billing retailers into this week's beats through SFA order taking.",
-      upliftL: (b.billTarget - b.billing) * 0.12,
+      upliftL: Math.max(0, b.billTarget - b.billing) * avgSale,
       territory: bp.x,
       lever: { label: "Channel deep dive", link: { kind: "deep", tab: "channel" } },
       route: "pitch",
-      confidence: conf(68, "Participation is exact from secondary billing; the last few days of the month usually add some billing back.", [src("thermometer", "Secondary billing", `${b.active} retailers in ${bp.x}`, "08:00 today", 3)]),
+      confidence: conf(`Participation is exact from the workbook's Sep sales to ${AS_OF.label}; uplift is the missing billers at the average Sep sale (${fmtL(avgSale)}).`, [
+        src("thermometer", "8. Actual Sales Value", `${b.billing} of ${b.active} retailers in ${bp.x} billed in ${FY_MONTHS[CUR]}`),
+      ]),
       trace: {
-        input: { label: "Participation check", detail: `${bp.x} · ${b.active - b.billing} retailers not billed`, at: "08:00" },
+        input: { label: "Participation check", detail: `${bp.x} · ${b.active - b.billing} retailers not billed`, at: AS_OF.label },
         evaluated: [
           { agent: "pitch", verdict: "beat order can carry the non-billing retailers", chosen: true },
           { agent: "thermometer", verdict: "too many retailers for individual actions" },

@@ -82,7 +82,7 @@ function PartnerList({ list, cols }: { list: ChannelPartner[]; cols: { label: st
                 {c.name} <span className="font-data text-cx-faint">{c.code}</span>
               </td>
               <td className="py-1.5 text-cx-muted">{c.territory}</td>
-              <td className="py-1.5 font-data text-cx-faint">{c.appt}</td>
+              <td className="py-1.5 font-data text-cx-faint" title={c.appt ? undefined : "No appointment date in the workbook"}>{c.appt ?? "—"}</td>
               {cols.map((k) => (
                 <td key={k.label} className={`py-1.5 ${k.right === false ? "text-left" : "text-right font-data"}`}>
                   {k.v(c)}

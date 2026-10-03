@@ -194,7 +194,14 @@ export function draftTrace(d: DraftInitiative): ActionTrace {
 /** "Things to consider", per territory (all of them when the scope is the whole region). */
 export const CONSIDER = M<{ agent: AgentId; territory: Territory; text: string; open: "thermometer" | "huddle" }[]>("CONSIDER");
 
-const STUDIO = M<{ weakest: string; weak: Record<string, string>; distributors: Record<string, string> }>("STUDIO");
+const STUDIO = M<{
+  weakest: string;
+  weak: Record<string, string>;
+  distributors: Record<string, string>;
+  /** what Studio reads before drafting: Huddle sheet themes, retailers the SOs visited this month, open tickets and initiatives */
+  sources: { huddleThemes: number; visitsThisMonth: number; openTickets: number; openInitiatives: number };
+}>("STUDIO");
+export const STUDIO_SOURCES = STUDIO.sources;
 
 /** Answers for the Studio's quick prompts, per scope, from the workbook. "" means "generate the plan". */
 export function studioAnswer(q: string, scope: Territory | null): string {

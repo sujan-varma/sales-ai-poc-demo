@@ -71,6 +71,33 @@ export const TERRITORIES = C<string[]>("TERRITORIES");
 /** days left in the current month after the data date, and the data date's day of month */
 export const DAYS_LEFT = C<number>("DAYS_LEFT");
 export const DATA_DAY = C<number>("DATA_DAY");
+/** the workbook's data date, "YYYY-MM-DD" */
+export const DATA_AS_OF = C<string>("DATA_AS_OF");
+
+/** The backend's confidence rule: base + perSheet × workbook sheets behind an item, capped; freshness is the data's age. */
+const CONF_RULE = C<{ base: number; perSheet: number; max: number; freshness: number; dataLabel: string }>("CONF_RULE");
+export const scoreFrom = (sheets: number) => Math.min(CONF_RULE.max, CONF_RULE.base + CONF_RULE.perSheet * sheets);
+/** A confidence scored by that rule: one point per independent workbook sheet among the sources. */
+export function confFromSources(rationale: string, sources: EvidenceSource[]): Confidence {
+  const ind = sources.filter((s) => s.independent).length;
+  const score = scoreFrom(ind);
+  return {
+    score,
+    rationale,
+    factors: { corroboration: Math.round(Math.min(0.95, 0.45 + 0.15 * ind) * 100) / 100, freshness: CONF_RULE.freshness, reliability: score / 100 },
+    sources,
+    rescoredAt: CONF_RULE.dataLabel,
+  };
+}
+/** An evidence source that is a workbook sheet, dated with the data date. */
+export const sheetSrc = (agent: AgentId, sheet: string, detail: string, independent = true): EvidenceSource => ({
+  agent,
+  title: sheet,
+  detail,
+  when: `Excel · ${CONF_RULE.dataLabel}`,
+  ageHours: 24,
+  independent,
+});
 
 // ---------------------------------------------------------------------------
 // Insights
@@ -142,6 +169,8 @@ export interface Recommendation {
   product: string;
   sector: string;
   segment: string;
+  /** the workbook retailers behind the recommendation */
+  outlets: number;
   /** when Thermometer first raised it — drives Today / This week / This month */
   raisedHoursAgo: number;
   confidence: Confidence;

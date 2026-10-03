@@ -22,6 +22,8 @@ export type MonthName = (typeof FY_MONTHS)[number];
 export const CUR = 5;
 export const AS_OF = Th<{ day: number; days: number; label: string }>("AS_OF");
 export const SYNC_NOTE = Th<string>("SYNC_NOTE");
+/** Huddle sheet themes about competitors and partners switching (quoted as evidence) */
+export const HUDDLE_SIGNALS = Th<{ n: number; theme: string; urgency: string | null; session: string | null; switching: boolean }[]>("HUDDLE_SIGNALS");
 export const FY_LABEL = "FY 2026–27";
 const ALL = FY_MONTHS.map((_, i) => i);
 
@@ -140,8 +142,10 @@ export interface ChannelPartner {
   region: string;
   asm: string;
   territory: string;
-  /** "YYYY-MM-DD"; null for long-standing partners with no recorded date */
-  appt: string;
+  /** "YYYY-MM-DD" (Onboarded On); null when the workbook has no date ("Not applicable", distributors) */
+  appt: string | null;
+  /** "YYYY-MM-DD": the SO's last visit (4. Retailer_Master); null if never visited or a distributor */
+  lastVisit: string | null;
   isNew: boolean;
   operating: boolean;
   /** LY average monthly sale, ₹ lakh. Fixes the size band; never moves with filters. */

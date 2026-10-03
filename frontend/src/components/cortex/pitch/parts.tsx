@@ -6,7 +6,7 @@
 
 import React, { useState } from "react";
 import { Check, ChevronDown, MessageSquare, Send } from "lucide-react";
-import { Confidence } from "@/data/cortexHome";
+import { Confidence, confFromSources, sheetSrc } from "@/data/cortexHome";
 import { Pitch, TalkingPoint, coveredTrace } from "@/data/pitch";
 import { AgentRunChip } from "../agentRun";
 import { TraceTooltip } from "../actionTrace";
@@ -64,13 +64,9 @@ export function MultiSelect({ label, values, options, onChange, allLabel = "All"
 
 function confidenceOf(t: TalkingPoint, p: Pitch): Confidence {
   const s = t.conf ?? 0;
-  return {
-    score: s,
-    rationale: `${confidenceBand(s)}: ${t.logic}`,
-    factors: { corroboration: Math.min(1, s / 100 + 0.02), freshness: 0.9, reliability: Math.max(0.5, s / 100 - 0.04) },
-    sources: [{ agent: t.fromPlan ? "map" : "pitch", title: t.evidence, detail: t.logic, when: p.generated ?? "Today", ageHours: 30, independent: true }],
-    rescoredAt: "09:40",
-  };
+  // the score itself comes with the talking point (backend sheet-count rule); freshness and date are the data's
+  const c = confFromSources(`${confidenceBand(s)}: ${t.logic}`, [sheetSrc(t.fromPlan ? "map" : "pitch", t.evidence, t.logic)]);
+  return { ...c, score: s, factors: { ...c.factors, reliability: s / 100 } };
 }
 
 export function PointsTable({ p, points, commentable = true }: { p: Pitch; points: TalkingPoint[]; commentable?: boolean }) {
