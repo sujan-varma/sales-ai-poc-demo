@@ -70,17 +70,19 @@ export function AgentRunChip({ run, onDone, minMs = 0, block = false }: { run: A
       <Check className="h-3.5 w-3.5 shrink-0" style={{ color: "#2fa85c" }} />
       {/* always one line: long results end in "…", the full text is in the tooltip */}
       <span className="min-w-0 truncate text-cx-text">{run.result}</span>
-      <button
-        onClick={() => {
-          // a result that landed in the October draft opens the draft itself, in MAP Studio
-          const to = role === "asm" && /october (plan )?draft/i.test(run.result) ? "map-studio" : linkPage(run.link, role);
-          if (to) go(to);
-          else toast(`Opens: ${run.link.replace("View ", "")}.`);
-        }}
-        className="shrink-0 whitespace-nowrap text-[#4f86f7] hover:underline"
-      >
-        {run.link} →
-      </button>
+      {run.link && (
+        <button
+          onClick={() => {
+            // a result that landed in the October draft opens the draft itself, in MAP Studio
+            const to = role === "asm" && /october (plan )?draft/i.test(run.result) ? "map-studio" : linkPage(run.link!, role);
+            if (to) go(to);
+            else toast(`Opens: ${run.link!.replace("View ", "")}.`);
+          }}
+          className="shrink-0 whitespace-nowrap text-[#4f86f7] hover:underline"
+        >
+          {run.link} →
+        </button>
+      )}
     </span>
   );
 }

@@ -56,10 +56,16 @@ function App() {
           <MapStudioPage key="map-studio" />
         ) : page === "map-plans" ? (
           <MapPlansPage key="map-plans" />
+        ) : page === "map-head" ? (
+          <MapPlansPage key="map-head" persona="head" />
         ) : page === "pitch" ? (
           <PitchPage key="pitch" />
+        ) : page === "pitch-head" ? (
+          <PitchPage key="pitch-head" persona="head" />
         ) : page === "pitch-detail" ? (
           <PitchDetailPage key={`pitch-detail-${location.hash}`} />
+        ) : page === "pitch-detail-head" ? (
+          <PitchDetailPage key={`pitch-detail-head-${location.hash}`} persona="head" />
         ) : page === "pitch-adhoc" ? (
           <PitchAdhocPage key="pitch-adhoc" />
         ) : page === "asm-priority-log" ? (

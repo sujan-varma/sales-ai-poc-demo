@@ -24,6 +24,7 @@ export const ROUTE_DONE_LABEL: Record<RecRoute, string> = {
   tracker: "Send to Tracker",
   map: "Escalate to Market Action Plan",
   pitch: "Push to Pitch engine",
+  head: "Escalate to Sales Head",
 };
 
 export const ACTION_TRACES = D<Record<string, ActionTrace>>("actionTraces", "ACTION_TRACES");

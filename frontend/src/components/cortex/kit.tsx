@@ -16,8 +16,8 @@ export function Eyebrow({ children }: { children: React.ReactNode }) {
 
 export function CardHeader({ icon, title, badge, right, id }: { icon: React.ReactNode; title: string; badge?: React.ReactNode; right?: React.ReactNode; id?: string }) {
   return (
-    <div className="flex items-center justify-between gap-2">
-      <h2 id={id} className="flex items-center gap-2.5 text-[15px] font-medium text-cx-text">
+    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+      <h2 id={id} className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[15px] font-medium text-cx-text">
         <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-cx-line bg-cx-raised text-cx-muted">{icon}</span>
         {title}
         {badge}

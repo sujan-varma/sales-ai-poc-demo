@@ -39,6 +39,14 @@ export function D<T>(module: string, key: string): T {
   return mod[key] as T;
 }
 
+/** When this page's data was loaded, and the backend workbook load it came from (for the Sync control). */
+export const loadInfo: { at: number; workbookLoadedAt?: string } = { at: Date.now() };
+
+/** The backend's current workbook load time, without fetching the data again. */
+export async function fetchWorkbookLoadedAt(): Promise<string | undefined> {
+  return (await getJson<{ loaded_at?: string }>("/api/web/sections")).loaded_at;
+}
+
 export function dataGaps() {
   return globalThis.__CORTEX_DATA__?.data_gaps ?? [];
 }
@@ -94,9 +102,10 @@ export function loadCortexData(onProgress?: (p: LoadProgress) => void): Promise<
       const p: LoadProgress = { steps: [] };
       emit(p);
       const [info] = await Promise.all([
-        getJson<{ built_ms: number; sections: { key: string; label: string; records: number }[] }>("/api/web/sections"),
+        getJson<{ built_ms: number; loaded_at?: string; sections: { key: string; label: string; records: number }[] }>("/api/web/sections"),
         wait(MIN_STEP_MS * 2),
       ]);
+      loadInfo.workbookLoadedAt = info.loaded_at;
       Object.assign(p, { builtMs: info.built_ms, steps: info.sections.map((x) => ({ ...x, state: "waiting" })) });
       emit(p);
       const data = {} as CortexData;
@@ -111,6 +120,7 @@ export function loadCortexData(onProgress?: (p: LoadProgress) => void): Promise<
       }
       await wait(MIN_STEP_MS); // the finished checklist stays up a moment
       globalThis.__CORTEX_DATA__ = data;
+      loadInfo.at = Date.now();
       return data;
     })().catch((e) => {
       pending = null;

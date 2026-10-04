@@ -74,6 +74,8 @@ export interface Initiative {
   delivered: number | null;
   description: string;
   steps: string[];
+  /** the sentence the Sales Executive says at the counter when this reaches a pitch */
+  pitchLine?: string;
   source: { agent: AgentId; ref: string; at: string };
   pitch: PitchPush;
   attachments: number;
@@ -84,6 +86,14 @@ export interface Initiative {
 export const SEP_PLAN = M<{ id: string; label: string; scope: string; version: string; locked: string; lockedShort: string; agreedOn: string; history: string }>("SEP_PLAN");
 
 export const SEP_INITIATIVES = M<Initiative[]>("SEP_INITIATIVES");
+
+// Every initiative a pitch can point at, by id: the ASM's own September rows, plus the other ASMs'
+// plans that org.ts registers when a page that needs them loads (the Head of Sales's views).
+const REGISTRY = new Map<string, Initiative>(SEP_INITIATIVES.map((i) => [i.id, i]));
+export function registerInitiatives(rows: Initiative[]) {
+  for (const i of rows) if (!REGISTRY.has(i.id)) REGISTRY.set(i.id, i);
+}
+export const initiativeById = (id: string) => REGISTRY.get(id);
 
 /** Summary row: only ₹ initiatives count toward impact; Delivered is against Agreed. */
 export function planSummary(rows: Initiative[]) {

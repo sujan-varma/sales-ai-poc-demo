@@ -13,7 +13,8 @@ ASM_HELP = "ASM persona for the ASM screens (default Raman)"
 # the web app's loader shows the sections in this order, with these names; any other key comes after them
 SECTIONS = {
     "cortexHome": "Home", "thermometer": "Thermometer", "leadership": "Leadership roll-up", "map": "Market Action Plan",
-    "pitch": "Pitch", "tracker": "Action Tracker", "huddle": "Huddle", "actionTraces": "Action traces", "data_gaps": "Data sources",
+    "pitch": "Pitch", "tracker": "Action Tracker", "huddle": "Huddle", "org": "Org-wide plans and pitches", "actionTraces": "Action traces",
+    "data_gaps": "Data sources",
 }
 
 
@@ -56,7 +57,7 @@ def sections(asm: Optional[str] = Query(None, description=ASM_HELP)):
     data = _payload(asm)
     keys = [k for k in SECTIONS if k in data] + [k for k in data if k not in SECTIONS]
     out = [{"key": k, "label": SECTIONS.get(k, k), "records": _records(data[k])} for k in keys]
-    return ApiResponse(data={"built_ms": round((time.perf_counter() - t) * 1000), "sections": out}, total=len(out))
+    return ApiResponse(data={"built_ms": round((time.perf_counter() - t) * 1000), "loaded_at": _workbook().loaded_at, "sections": out}, total=len(out))
 
 
 @router.get("/sections/{key}", response_model=ApiResponse[Any], summary="One section of the web app's data")

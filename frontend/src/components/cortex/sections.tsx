@@ -38,7 +38,7 @@ import { useHome } from "./HomeState";
 import { useCortexNav } from "./nav";
 import { livePlanMonths, useLoop } from "./tracker/loop";
 import { useOctPlan } from "./map/octPlan";
-import { openOctoberPlan, openSeptemberPlan } from "./map/MapPlansPage";
+import { openOctoberPlan, openSeptemberPlan } from "./map/openPlan";
 import { AgentIcon, ConnectChip, Panel, PanelHeader, SelectMenu, StatusBadge, TextLink } from "./primitives";
 import { useStatusMeta } from "./statusPalette";
 
@@ -402,7 +402,7 @@ export function PlanTimeline({ months, active }: { months: PlanMonth[]; active?:
 }
 
 export function MapPanel() {
-  const { role, decisions, routes, openPlan, toast } = useHome();
+  const { role, decisions, routes, openPlan } = useHome();
   const go = useCortexNav();
   const escalated = RECOMMENDATIONS.filter((r) => decisions[r.id] === "escalated" || routes[r.id]?.includes("map"));
   const sep = livePlanMonths(useLoop()).find((m) => m.month === "Sep")!;
@@ -415,7 +415,7 @@ export function MapPanel() {
       <PanelHeader
         agent="map"
         title="Market Action Plan"
-        right={<TextLink onClick={() => (role === "asm" ? (openSeptemberPlan(), go("map-plans")) : toast("Opens Market Action Plan."))}>Open plan</TextLink>}
+        right={<TextLink onClick={() => (openSeptemberPlan(), go(role === "head" ? "map-head" : "map-plans"))}>Open plan</TextLink>}
       />
       <div className="px-5 pb-6 pt-5">
         <div className="grid grid-cols-3 gap-px overflow-hidden rounded-md border border-cx-line bg-cx-line">

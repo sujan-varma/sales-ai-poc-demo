@@ -5,7 +5,8 @@
 
 import { ActionTrace } from "./actionTraces";
 import { AgentId, scoreFrom } from "./cortexHome";
-import { Initiative, MAP_LABELS, Priority, SEP_INITIATIVES, SEP_PLAN, Territory, execFor } from "./map";
+import { Initiative, MAP_LABELS, Priority, SEP_INITIATIVES, SEP_PLAN, Territory, execFor, initiativeById } from "./map";
+import { ORG_KPIS, ORG_PLAN_LINES, ORG_POINTS } from "./org";
 import { D } from "./source";
 
 const P = <T,>(key: string) => D<T>("pitch", key);
@@ -64,6 +65,9 @@ export interface Pitch {
   tone: string;
   /** something arrived after generation (the "What's new" banner) */
   news?: { agent: AgentId; when: string; text: string }[];
+  /** org-wide pitches only: the ASM and region the pitch was built for */
+  asm?: string;
+  region?: string;
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -171,14 +175,14 @@ export function suggestionsFor(s: PitchSession): Initiative[] {
 // ---------------------------------------------------------------------------
 
 export function kpisFor(p: Pitch) {
-  return KPIS[p.outlet] ?? { value: "—", target: "—", outstanding: "—", skus: "—" };
+  return KPIS[p.outlet] ?? ORG_KPIS[p.outlet] ?? { value: "—", target: "—", outstanding: "—", skus: "—" };
 }
 
 function planPoint(i: Initiative): Omit<TalkingPoint, "n"> {
   const topic = i.lever === "Range selling" ? "Sell top seller" : i.lever === "Influencer engagement" || i.lever === "Retail reach" ? "Maintain & grow" : "Open issues";
   return {
     topic,
-    point: PLAN_LINES[i.id] ?? i.steps[0],
+    point: PLAN_LINES[i.id] ?? ORG_PLAN_LINES[i.id] ?? i.pitchLine ?? i.steps[0],
     why: i.description.split(". ")[0] + ".",
     logic: `Plan initiative #${i.n} · ${i.priority} priority`,
     evidence: `Market Action Plan · ${SEP_PLAN.label.split(" ")[0]} · #${i.n}`,
@@ -190,11 +194,16 @@ function planPoint(i: Initiative): Omit<TalkingPoint, "n"> {
 
 /** Talking points for one pitch, with the officer's visit applied. */
 export function pointsFor(p: Pitch): TalkingPoint[] {
-  const base = [...(POINTS[p.outlet] ?? [])];
+  const base = [...(POINTS[p.outlet] ?? ORG_POINTS[p.outlet] ?? [])];
   // plan pushes become talking points; a Thermometer route becomes the "Open issues" point
-  const extra = p.sources.map((s) => (s.kind === "plan" ? planPoint(SEP_INITIATIVES.find((i) => i.id === s.initiative)!) : THERMO_ROUTE!.point));
+  const extra = p.sources.map((s) => {
+    if (s.kind !== "plan") return THERMO_ROUTE?.point ?? null;
+    const i = initiativeById(s.initiative);
+    return i ? planPoint(i) : null;
+  });
   const merged = [...base];
   for (const e of extra) {
+    if (!e) continue;
     const at = merged.findIndex((m) => m.topic === e.topic);
     if (at >= 0 && !merged[at].fromPlan) merged.splice(at, 1, e);
     else merged.splice(Math.min(2, merged.length), 0, e);
@@ -215,14 +224,15 @@ export function pitchTrace(p: Pitch): ActionTrace {
   const plan = p.sources.filter((s): s is Extract<PitchSource, { kind: "plan" }> => s.kind === "plan");
   const therm = p.sources.find((s) => s.kind === "thermometer") as Extract<PitchSource, { kind: "thermometer" }> | undefined;
   const auto = plan.some((s) => s.mode === "auto");
-  const first = plan[0] && SEP_INITIATIVES.find((i) => i.id === plan[0].initiative)!;
+  const first = plan[0] && initiativeById(plan[0].initiative);
   const month = SEP_PLAN.label.split(" ")[0];
+  const asm = p.asm ?? MAP_LABELS.asm;
   return {
     input: therm
       ? { label: therm.label, detail: `${p.outlet} · ${p.territory}`, at: p.generated ?? "Queued" }
-      : { label: auto ? `${month} plan agreed · auto-push` : `Pushed by ${MAP_LABELS.asm} from the plan`, detail: `#${first?.n} ${first?.title} · ${first?.priority} priority`, at: p.generated ?? "Queued" },
+      : { label: auto ? `${month} plan agreed · auto-push` : `Pushed by ${asm} from the plan`, detail: `#${first?.n} ${first?.title} · ${first?.priority} priority`, at: p.generated ?? "Queued" },
     evaluated: [
-      ...(therm ? [{ agent: "thermometer" as AgentId, verdict: "routed the recommendation to Pitch on its own", chosen: true }] : [{ agent: "map" as AgentId, verdict: auto ? "pushed it under the High-priority rule" : `held it below the auto-push cut-off until ${MAP_LABELS.asm} confirmed`, chosen: true }]),
+      ...(therm ? [{ agent: "thermometer" as AgentId, verdict: "routed the recommendation to Pitch on its own", chosen: true }] : [{ agent: "map" as AgentId, verdict: auto ? "pushed it under the High-priority rule" : `held it below the auto-push cut-off until ${asm} confirmed`, chosen: true }]),
       { agent: "pitch", verdict: `built ${pointsFor(p).length} talking points for a ${p.type.toLowerCase()} in ${p.language}, ${p.tone.toLowerCase()} tone` },
       { agent: "huddle", verdict: p.news?.some((n) => n.agent === "huddle") ? "added a newer signal after generation" : "had no conflicting signal for this outlet" },
     ],
@@ -249,7 +259,8 @@ export function coveredTrace(p: Pitch, t: TalkingPoint): ActionTrace {
 /** Plan initiatives a pitch was pushed from, for its header. */
 export function sourceLabel(s: PitchSource) {
   if (s.kind === "thermometer") return { text: s.label, mode: "From Thermometer" };
-  const i = SEP_INITIATIVES.find((x) => x.id === s.initiative)!;
+  const i = initiativeById(s.initiative);
+  if (!i) return { text: `${SEP_PLAN.label.split(" ")[0]} plan`, mode: s.mode === "auto" ? "Auto-pushed" : "Pushed by the ASM" };
   return { text: `${SEP_PLAN.label.split(" ")[0]} plan · #${i.n} ${i.title}`, mode: s.mode === "auto" ? `Auto-pushed · ${i.priority}` : `Pushed by ${MAP_LABELS.asm}`, priority: i.priority as Priority };
 }
 

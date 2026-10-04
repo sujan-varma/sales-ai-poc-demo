@@ -8,19 +8,14 @@
 // accurate, concurrent four-block flow sits behind "Show details".
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowDown, Building2, Check, ChevronDown, ChevronRight, ListChecks, Map as MapIcon, RefreshCw, RotateCcw, Thermometer } from "lucide-react";
+import { Building2, ChevronDown, ChevronRight, ListChecks, Map as MapIcon, RefreshCw, RotateCcw, Thermometer } from "lucide-react";
 import { LAST_STORY, LIVE_STORY, StoryIcon, StoryRun } from "@/data/leadership";
 import { card } from "../kit";
 import { useCortexNav } from "../nav";
 import { LiveFlow } from "./liveFlow";
+import { LIVE_TIMING, SEQ_GRID, SeqState, SequenceConnector, SequenceTile } from "../storySequence";
 
-// each stage holds for 10 s so a presenter can talk to it (1 Oct corrections)
-const ACTIVE_MS = 10000;
-const HANDOFF_MS = 700;
-const START_MS = 700;
 const DONE_KEY = "cx-story-done";
-
-type St = "waiting" | "active" | "done";
 
 /** live: stage `at` is running (or handing off to the next); idle: nothing running, show `run` as it last finished */
 type Mode = { kind: "live"; at: number; handoff: boolean } | { kind: "idle"; run: StoryRun; finishedMs: number | null };
@@ -35,14 +30,14 @@ function useStory() {
   const play = useCallback(() => {
     clear();
     const n = LIVE_STORY.stages.length;
-    let t = START_MS;
+    let t = LIVE_TIMING.start;
     setMode({ kind: "live", at: -1, handoff: false });
     for (let i = 0; i < n; i++) {
       timers.current.push(setTimeout(() => setMode({ kind: "live", at: i, handoff: false }), t));
-      t += ACTIVE_MS;
+      t += LIVE_TIMING.active;
       if (i < n - 1) {
         timers.current.push(setTimeout(() => setMode({ kind: "live", at: i, handoff: true }), t));
-        t += HANDOFF_MS;
+        t += LIVE_TIMING.handoff;
       }
     }
     timers.current.push(
@@ -98,7 +93,7 @@ export function OrchestrationStory() {
   const run = live ? LIVE_STORY : mode.run;
   const ago = useAgo(mode.kind === "idle" ? mode.finishedMs : null);
 
-  const state = (i: number): St => {
+  const state = (i: number): SeqState => {
     if (!live) return "done";
     if (mode.at < 0 || i > mode.at) return "waiting";
     if (i === mode.at && !mode.handoff) return "active";
@@ -147,11 +142,11 @@ export function OrchestrationStory() {
       </p>
 
       {/* the chain: horizontal on desktop, a column on small screens */}
-      <ol className="grid grid-cols-1 gap-1 px-5 pb-2 pt-6 md:grid-cols-[minmax(0,1fr)_minmax(28px,0.45fr)_minmax(0,1fr)_minmax(28px,0.45fr)_minmax(0,1fr)_minmax(28px,0.45fr)_minmax(0,1fr)_minmax(28px,0.45fr)_minmax(0,1fr)] md:gap-0">
+      <ol className={`grid grid-cols-1 gap-1 px-5 pb-2 pt-6 md:gap-0 ${SEQ_GRID[5]}`}>
         {run.stages.map((s, i) => (
           <React.Fragment key={s.icon + i}>
             <Stage stage={s} st={state(i)} idle={!live} />
-            {i < run.stages.length - 1 && <Connector lit={lit(i)} travelling={travelling(i)} />}
+            {i < run.stages.length - 1 && <SequenceConnector lit={lit(i)} travelling={travelling(i)} />}
           </React.Fragment>
         ))}
       </ol>
@@ -201,57 +196,14 @@ function StageIcon({ icon }: { icon: StoryIcon }) {
   }
 }
 
-function Stage({ stage, st, idle }: { stage: StoryRun["stages"][number]; st: St; idle: boolean }) {
-  const active = st === "active";
-  const tile =
-    st === "active"
-      ? "cx-glow cx-glow-round text-[color:var(--ai-ink)]"
-      : st === "done"
-        ? `border border-cx-line bg-cx-raised ${idle ? "text-cx-muted" : "text-cx-text"}`
-        : "border border-dashed border-cx-strong text-cx-faint opacity-60";
+function Stage({ stage, st, idle }: { stage: StoryRun["stages"][number]; st: SeqState; idle: boolean }) {
   return (
-    <li className="flex min-w-0 items-center gap-4 py-2 md:flex-col md:gap-0 md:py-0 md:text-center" aria-current={active ? "step" : undefined}>
-      <span className="relative flex shrink-0 justify-center">
-        <span className={`relative flex h-16 w-16 items-center justify-center rounded-full transition-colors duration-500 md:h-[88px] md:w-[88px] ${tile}`}>
-          <span className={active ? "cx-breathe" : ""}>
-            <StageIcon icon={stage.icon} />
-          </span>
-        </span>
-        {st === "done" && (
-          <span className="absolute -bottom-0.5 right-0 flex h-5 w-5 items-center justify-center rounded-full border-2 border-cx-panel bg-[#2fa85c] md:right-1" aria-label="done">
-            <Check className="h-3 w-3 text-white" strokeWidth={3} />
-          </span>
-        )}
-      </span>
-      <span className="min-w-0 md:mt-3 md:px-1">
-        <span className={`block font-data text-[10.5px] uppercase tracking-[0.08em] ${active ? "text-[color:var(--ai-ink)]" : "text-cx-faint"}`}>{stage.actor}</span>
-        <span className={`mt-1 block text-[12.5px] leading-snug ${active ? "text-cx-text" : st === "done" ? "text-cx-muted" : "text-cx-faint"}`}>
-          {active ? (
-            <>
-              {stage.doing}…
-            </>
-          ) : st === "done" ? (
-            stage.did
-          ) : (
-            "Waiting"
-          )}
-        </span>
-      </span>
-    </li>
-  );
-}
-
-/** Arrow to the next stage; on hand-off a dot travels it once. */
-function Connector({ lit, travelling }: { lit: boolean; travelling: boolean }) {
-  return (
-    <li aria-hidden className="flex justify-start pl-6 md:block md:pl-0 md:pt-[43px]">
-      <ArrowDown className={`h-4 w-4 md:hidden ${lit ? "text-[color:var(--ai-ink)]" : "text-cx-strong"}`} />
-      <span className="relative hidden h-px w-full md:block">
-        <span className="absolute inset-0 bg-cx-line" />
-        <span className={`absolute inset-y-0 left-0 w-full origin-left bg-[#4f86f7] transition-transform duration-700 motion-reduce:transition-none ${lit ? "scale-x-100" : "scale-x-0"}`} style={{ transitionTimingFunction: "cubic-bezier(0.22,1,0.36,1)" }} />
-        <span className={`absolute -right-0.5 -top-[4.5px] h-0 w-0 border-y-[5px] border-l-[6px] border-y-transparent ${lit ? "border-l-[#4f86f7]" : "border-l-[rgb(var(--cx-strong))]"}`} />
-        {travelling && <span className="cx-travel absolute -top-[3px] h-[7px] w-[7px] -translate-x-1/2 rounded-full bg-ai shadow-[0_0_10px_rgba(94,234,212,0.8)]" />}
-      </span>
-    </li>
+    <SequenceTile
+      icon={<StageIcon icon={stage.icon} />}
+      actor={stage.actor}
+      line={st === "active" ? `${stage.doing}…` : st === "done" ? stage.did : "Waiting"}
+      state={st}
+      dim={idle}
+    />
   );
 }

@@ -19,8 +19,11 @@ export type CortexView =
   | "asm-logs-priority"
   | "map-plans"
   | "map-studio"
+  | "map-head"
   | "pitch"
+  | "pitch-head"
   | "pitch-detail"
+  | "pitch-detail-head"
   | "pitch-adhoc"
   | "tracker"
   | "tracker-head"
@@ -43,8 +46,11 @@ const LOADERS: Record<CortexView, Loader> = {
   "asm-logs-priority": () => import("@/components/cortex/LogsPage").then((m) => ({ default: () => <m.LogsPage view="priority" persona="asm" /> })),
   "map-plans": () => import("@/components/cortex/map/MapPlansPage").then((m) => ({ default: m.MapPlansPage })),
   "map-studio": () => import("@/components/cortex/map/MapStudioPage").then((m) => ({ default: m.MapStudioPage })),
+  "map-head": () => import("@/components/cortex/map/MapPlansPage").then((m) => ({ default: () => <m.MapPlansPage persona="head" /> })),
   pitch: () => import("@/components/cortex/pitch/PitchPage").then((m) => ({ default: m.PitchPage })),
+  "pitch-head": () => import("@/components/cortex/pitch/PitchPage").then((m) => ({ default: () => <m.PitchPage persona="head" /> })),
   "pitch-detail": () => import("@/components/cortex/pitch/PitchDetailPage").then((m) => ({ default: m.PitchDetailPage })),
+  "pitch-detail-head": () => import("@/components/cortex/pitch/PitchDetailPage").then((m) => ({ default: () => <m.PitchDetailPage persona="head" /> })),
   "pitch-adhoc": () => import("@/components/cortex/pitch/PitchAdhocPage").then((m) => ({ default: m.PitchAdhocPage })),
   tracker: () => import("@/components/cortex/tracker/TrackerPage").then((m) => ({ default: () => <m.TrackerPage persona="asm" /> })),
   "tracker-head": () => import("@/components/cortex/tracker/TrackerPage").then((m) => ({ default: () => <m.TrackerPage persona="head" /> })),

@@ -23,7 +23,7 @@ cp .env.example .env          # then set API_KEY (see below)
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-- Startup takes about 17 seconds while the 27 MB workbook loads. Requests work once the log shows `Application startup complete`.
+- Startup takes about 17 seconds while the 20 MB workbook loads. Requests work once the log shows `Application startup complete`.
 - Swagger UI is at http://localhost:8000/docs. To call the protected endpoints there, click **Authorize** and paste your `API_KEY`.
 - `--reload` restarts the server, and so reloads the workbook, whenever a `.py` file changes. To watch only the code, add `--reload-dir app`.
 
@@ -133,6 +133,18 @@ Built by `app/services/web_plan.py` for the ASM, from the workbook:
 | Market sheets | `Data 11` shares for the ASM's micro market; ₹ size = company Apr–Aug run-rate ÷ share; territories split it by their distributors' retailer universe. Reach and influencers straight from the sheets |
 | Pitch | One pitch per outlet the plan reaches; KPIs and talking points from the outlet's own rows (tenure, credit, SKU gap in `11. Sep projections`, loyalty pitch statement, short supply). Visited = last SO visit on or after 1 Sep |
 | Tracker | The ASM's signal groups (Needs an owner) and the officers' retailer actions (Team), plus — per request, from `tracker.json` — assignments, the officers' updates and completions, and verifications |
+| Past months (Apr–Aug) | No plan records exist, so a closed month's plan rows are its territory × category targets (`9. Target Sales Value`) against what was billed (`8. Actual Sales Value`); they sum exactly to the month's plan figures |
+
+## Org-wide plans and pitches (`org` in `/api/web/bootstrap`)
+
+The Head of Sales's read-only Market Action Plan (`/leadership/map`) and Pitch (`/leadership/pitch`) pages. `web_plan.build_org` runs the same plan build for **every** ASM: `ORG_PLANS` (each ASM × Apr–Oct, figures from the same monthly target/actual rule as `PLAN_MONTHS`), `ORG_INITIATIVES` (per plan id), `ORG_EXECS` (each ASM's sales officers), and `ORG_PITCHES` with their outlets, KPIs and talking points. The viewing ASM's own September rows and pitches are left out — the web app reads them from `map` / `pitch`, which carry the per-request tracker overlay. Ten sales officers serve more than one ASM in the workbook, so each org pitch carries its `asm` and `region`.
+
+## Insight states and the walkthrough thread (`cortexHome`)
+
+- `INSIGHT_ACTIONS` / `FINDING_ACTIONS`: either a suggested action (`label` + `run`) or how the item settled — `done` (the pacing gap is already in the October draft), `closed` with `bySfa` (the SO's last visit to the short-supplied retailer is after the short supply), `closed` (an insight resting on one sheet, score under 70), or, for Huddle findings owned by another department, `done` (routed there).
+- `isNew` marks items computed from the data date's own records; findings take `territory` and `isNew` from the insight or recommendation they corroborate.
+- `DEMO_SCENARIO`: the thread the home cards narrow to while demo scope is on — insights still waiting on the ASM or new, and the findings that corroborate them; `leadInsights` is the ASM's own collections item on the Head of Sales homepage (`li-4`).
+- `thermometer.SYNC_FEEDS` lists the sheets and agents the Thermometer Sync control steps through; `GET /api/web/sections` returns the workbook's `loaded_at`, which the control compares to tell when the server has newer data.
 
 ## Huddle data (`huddle` in `/api/web/bootstrap`)
 

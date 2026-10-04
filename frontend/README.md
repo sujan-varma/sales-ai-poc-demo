@@ -15,6 +15,7 @@ Interactive cockpit prototype and wireframe execution for **Cortex** (Sales AI p
 | `/configuration` | Head of Sales Configuration — platform settings and decision thresholds (sidebar icon) | `src/components/cortex/ConfigurationPage.tsx` |
 | `/map` · `/map/studio` | Market Action Plans (index + September plan) · MAP Studio (October draft) — ASM | `src/components/cortex/map/` + `src/data/map.ts` |
 | `/pitch` · `/pitch/detail` · `/pitch/adhoc` | Pitch per sales officer · one pitch · ad hoc pitch — ASM | `src/components/cortex/pitch/` + `src/data/pitch.ts` |
+| `/leadership/map` · `/leadership/pitch` · `/leadership/pitch/detail` | Head of Sales, read-only: every ASM's plans by month (opening to the same plan detail) and every ASM's pitch board; the one action is a comment, which becomes a ticket the ASM owns | `map/OrgPlanIndex.tsx`, `pitch/OrgPitchBoard.tsx` + `src/data/org.ts` (backend `org` section) |
 | `/tracker` · `/leadership/tracker` | Action Tracker board — ASM (My Actions · Team) and Head of Sales (roll-up at ASM level) | `src/components/cortex/tracker/` + `src/data/tracker.ts` |
 | `/huddle` · `/huddle/meetings` · `/huddle/series` · `/huddle/meeting` | Huddle agent: Intel Hub · Meeting Repository · series and meeting detail (the Huddle product's screens and navigation, in this app's frame and dark theme like Thermometer, MAP and Pitch) | `src/components/cortex/huddle/` + `src/data/huddle.ts` |
 | `/asm/logs/priority` · `/asm/logs/activity` | Logs, scoped to the ASM's region | `src/components/cortex/LogsPage.tsx` |
