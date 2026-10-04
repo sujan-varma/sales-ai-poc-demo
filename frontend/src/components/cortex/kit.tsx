@@ -5,10 +5,41 @@
 // and the KPI striped bar.
 
 import React, { useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, DatabaseZap } from "lucide-react";
 import { useOutside } from "./shell";
 
 export const card = "rounded-lg border border-cx-line bg-cx-panel";
+
+/**
+ * What a card shows when the backend returned nothing for it — never an empty table, a made-up row or a crash.
+ * `source` names where the data would come from (a workbook sheet or a backend section), so the gap is traceable.
+ * `bare` drops the card frame, for use inside a card that already has one.
+ */
+export function NoDataCard({
+  title = "No data yet",
+  detail,
+  source,
+  bare = false,
+  children,
+}: {
+  title?: string;
+  detail: React.ReactNode;
+  source?: string;
+  bare?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div role="status" className={`${bare ? "" : card} flex flex-col items-center px-6 py-10 text-center`}>
+      <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-cx-line bg-cx-raised text-cx-faint" aria-hidden>
+        <DatabaseZap className="h-4 w-4" />
+      </span>
+      <h3 className="mt-3 text-[14px] font-medium text-cx-text">{title}</h3>
+      <p className="mx-auto mt-1 max-w-md text-[12.5px] leading-relaxed text-cx-muted">{detail}</p>
+      {source && <p className="mt-2 font-data text-[10.5px] uppercase tracking-[0.06em] text-cx-faint">Source · {source}</p>}
+      {children && <div className="mt-4">{children}</div>}
+    </div>
+  );
+}
 
 export function Eyebrow({ children }: { children: React.ReactNode }) {
   return <h3 className="font-data text-[10.5px] uppercase tracking-[0.08em] text-cx-faint">{children}</h3>;

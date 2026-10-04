@@ -968,8 +968,9 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
     waiting = [i for i in insights if "label" in INSIGHT_ACTIONS[i["id"]]]
     settled = [i for i in insights if "label" not in INSIGHT_ACTIONS[i["id"]]]
     INSIGHTS_SUMMARY = {
-        "short": (f"{len(settled)} of {len(insights)} signals settled without you" if settled else f"All {len(insights)} signals are open")
-                 + (f"; {', '.join(i['territory'] for i in waiting[:2])} {'is' if len(waiting[:2]) == 1 else 'are'} still waiting on you." if waiting else "; nothing is waiting on you."),
+        "short": ("No signals on the current data date." if not insights else
+                  (f"{len(settled)} of {len(insights)} signals settled without you" if settled else f"All {len(insights)} signals are open")
+                  + (f"; {', '.join(i['territory'] for i in waiting[:2])} {'is' if len(waiting[:2]) == 1 else 'are'} still waiting on you." if waiting else "; nothing is waiting on you.")),
         "text": " ".join([f"Waiting on you: {i['headline']}" for i in waiting]
                          + [f"Already settled in {i['territory']}: {settled_note(INSIGHT_ACTIONS[i['id']]).split(' · ', 1)[-1]}." for i in settled]),
         "confidence": conf(round(sum(i["confidence"]["score"] for i in insights) / max(1, len(insights))), "Synthesised from the insights below, all computed from the workbook.",
@@ -1069,6 +1070,8 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
             "ACTION_MONTHS": {"asm": action_months(my), "head": action_months(allf)}, "WEAKEST_BY_MONTH": WEAKEST,
             "PLAN_RUN": {"agent": "map", "steps": ["reading September to the 20th", "weighing open recommendations", "drafting initiatives"], "result": f"October draft ready — {min(3, len(recs))} initiatives across {len(my_terrs)} territories", "link": "View draft"},
             "FINDING_ACTIONS": finding_actions, "DEMO_SCENARIO": DEMO_SCENARIO,
+            # open escalations by source id (per request, overlay_escalations)
+            "ESCALATIONS": {},
         },
         "org": ORG,
         "leadership": {
@@ -1193,4 +1196,44 @@ def thermo_bdes(org: _Org) -> list[dict[str, Any]]:
         out.append({"code": f"BDE-{n}", "role": "BDE", "name": r["pos"], "territory": terr, "monthlyTarget": 0, "months": [0] * 12,
                     "leadTgt": int(nums[0]) if len(nums) > 1 else 0, "leadAch": int(nums[1]) if len(nums) > 1 else 0, "oppValue": 0,
                     "converted": int(nums[4]) if len(nums) > 4 else 0})
+    return out
+
+
+# ---------------------------------------------------------------- per-request: escalations to the Head of Sales
+
+def overlay_escalations(data: dict[str, Any]) -> dict[str, Any]:
+    """Apply the ASMs' open escalations (tracker.json) without touching the cached payload: each becomes a decision in
+    the Head of Sales's Needs your decision, and the viewing ASM's plan rows and recommendations carry their own."""
+    from app.services import tracker as tracker_store
+
+    open_ = tracker_store.list_escalations()
+    if not open_:
+        return data
+    ld, ch, mp = data["leadership"], data["cortexHome"], data["map"]
+    A = mp["LABELS"]["asm"]
+    region_of = {r["asm"]: r["name"] for r in ld["REGIONS"]}
+    head = ch["VIEWER"]["head"]["name"]
+    decisions = list(ld["DECISIONS"])
+    for e in sorted(open_, key=lambda e: e["created"]):
+        n = len(decisions) + 1
+        what = "plan row" if e["kind"] == "plan" else "recommendation"
+        decisions.append({
+            "id": f"esc-{e['id']}", "n": n, "question": e["note"],
+            "context": f"{e['by']} escalated the {what} “{e['title']}”" + (f" in {e['territory']}" if e.get("territory") else "") + ".",
+            "region": region_of.get(e["by"], ""), "territory": e.get("territory") or "", "asm": e["by"],
+            "raised": f"{web_plan._when(e['created'])} · {e['id']} · escalated by {e['by']}",
+            "stake": f"{e.get('priority') or 'No'} priority {what}", "recommendation": f"{e['by']} asks you to approve it; Sales AI adds no suggestion of its own.",
+            "thresholdId": "plan", "thresholdLabel": f"Escalated by {e['by']}",
+            # the suggested answer is the ASM's own ask, not an AI recommendation
+            "options": [{"id": "a", "label": f"Approve, as {e['by']} asks", "recommended": True, "outcome": f"{e['by']} goes ahead"},
+                        {"id": "b", "label": "Decline", "outcome": f"{e['by']} keeps it within the current plan"}],
+            "run": {"agent": "map", "steps": ["recording your answer", f"sending it to {e['by']}"], "result": f"Answer sent to {e['by']} on {e['id']}", "link": "View in Tracker"},
+            "confidence": conf(score_from(1), f"Raised by {e['by']}; the evidence is the {what}'s own workbook source.",
+                               [src("map" if e["kind"] == "plan" else "thermometer", e["title"], e.get("territory") or "")]),
+        })
+    mine = {e["source_id"]: {"id": e["id"], "note": e["note"], "at": web_plan._when(e["created"]), "to": head} for e in open_ if e["by"] == A}
+    out = dict(data)
+    out["leadership"] = {**ld, "DECISIONS": decisions}
+    out["cortexHome"] = {**ch, "ESCALATIONS": mine}
+    out["map"] = {**mp, "SEP_INITIATIVES": [{**i, "escalation": mine[i["id"]]} if i["id"] in mine else i for i in mp["SEP_INITIATIVES"]]}
     return out

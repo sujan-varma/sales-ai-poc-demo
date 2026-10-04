@@ -17,7 +17,7 @@ import { CATEGORIES, MAP_LABELS, SALES_EXECS, TERRITORIES, SEP_INITIATIVES, fmtV
 import { EMPTY_SESSION, LANGUAGES, Pitch, PitchSession, SUGGESTED_OUTLETS, outstandingCount, pitchesFor, readSession, suggestionsFor, writeSession } from "@/data/pitch";
 import { AgentRunChip } from "../agentRun";
 import { AgentPageHeader, AgentPersona, AsmAgentPage, PriorityPill, btn, btnPrimary } from "../agentPage";
-import { card, Dropdown } from "../kit";
+import { NoDataCard, card, Dropdown } from "../kit";
 import { useCortexNav } from "../nav";
 import { MultiSelect, setOpenPitch } from "./parts";
 import { SePitches } from "./SePitches";
@@ -176,6 +176,13 @@ function Body() {
           </section>
         )}
 
+        {all.length === 0 && suggestions.length === 0 ? (
+          <NoDataCard
+            title="No pitches yet"
+            detail={`The backend sent no pitches for ${MAP_LABELS.region}: no plan initiative has reached an outlet, and nothing is waiting to be pushed.`}
+            source="GET /api/web/sections/pitch · /sections/map"
+          />
+        ) : (
         <section aria-labelledby="se-title" className={`${card} overflow-x-auto`}>
           <h2 id="se-title" className="sr-only">
             Pitches by Sales Executive
@@ -235,6 +242,7 @@ function Body() {
             })}
           </table>
         </section>
+        )}
       </div>
     </div>
   );

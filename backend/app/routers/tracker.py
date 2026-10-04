@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Security
 
 from app.config import get_settings
 from app.routers.sales import _workbook
-from app.schemas import ActionEvent, ApiResponse, AsmCommentRequest, AssignRequest, ReviewRequest
+from app.schemas import ActionEvent, ApiResponse, AsmCommentRequest, AssignRequest, EscalateRequest, ReviewRequest, WithdrawRequest
 from app.security import api_key_header, require_api_key
 from app.services import tracker
 
@@ -75,6 +75,36 @@ async def asm_comment(action_id: str, req: AsmCommentRequest):
     except tracker.TrackerError as e:
         raise HTTPException(e.status, str(e))
     return ApiResponse(data=data, total=1)
+
+
+@router.post(
+    "/escalate",
+    response_model=ApiResponse[dict[str, Any]],
+    summary="The ASM escalates a plan row or recommendation to the Head of Sales as a decision",
+    description="Stores it with a DEC-n id; it appears in the Head of Sales's Needs your decision until withdrawn. "
+                "Escalating the same item again while it is open returns the open one (`created: false`).",
+)
+def escalate(req: EscalateRequest):
+    try:
+        data = tracker.escalate(_workbook(), req.model_dump())
+    except tracker.TrackerError as e:
+        raise HTTPException(e.status, str(e))
+    return ApiResponse(data=data, total=1)
+
+
+@router.post("/escalations/{esc_id}/withdraw", response_model=ApiResponse[dict[str, Any]], summary="The ASM withdraws an open escalation")
+def withdraw(esc_id: str, req: WithdrawRequest):
+    try:
+        data = tracker.withdraw_escalation(esc_id, req.by)
+    except tracker.TrackerError as e:
+        raise HTTPException(e.status, str(e))
+    return ApiResponse(data=data, total=1)
+
+
+@router.get("/escalations", response_model=ApiResponse[list[dict[str, Any]]], summary="Open escalations, newest first")
+def escalations(by: Optional[str] = Query(None, description="ASM name, e.g. Raman")):
+    data = tracker.list_escalations(by)
+    return ApiResponse(data=data, total=len(data))
 
 
 @router.post(

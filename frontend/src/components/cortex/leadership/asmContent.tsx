@@ -14,7 +14,7 @@ import { AgentRunChip } from "../agentRun";
 import { useHome } from "../HomeState";
 import { AgentIcon, Avatar, StatusBadge } from "../primitives";
 import { card, CardHeader, Dropdown } from "../kit";
-import { DemoScopeChip, FeedSheet } from "../feedSheet";
+import { DemoScopeChip, FeedEmpty, FeedSheet } from "../feedSheet";
 import { DEMO_SCENARIO, useDemoScope } from "@/data/demo";
 import { CommentBox, useLeadership } from "./common";
 import { useCortexNav } from "../nav";
@@ -182,6 +182,7 @@ export function LeadershipInsights() {
       <button onClick={() => setMore((m) => !m)} className="mt-0.5 self-start text-[11.5px] text-cx-muted hover:text-cx-text">
         {more ? "View less" : "View more"}
       </button>
+      {rows.length === 0 && <FeedEmpty total={LEAD_INSIGHTS.length} what="insights waiting on you" source="GET /api/web/sections/leadership · LEAD_INSIGHTS" />}
       <ul className="mt-3">
         {rows.map((ins) => (
           <InsightItem key={ins.id} ins={ins} />

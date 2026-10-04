@@ -38,7 +38,7 @@ import { TraceTrigger } from "../actionTrace";
 import { AgentPageHeader, AgentPersona, AsmAgentPage, DotStatus, PriorityPill, btnPrimary, useReadOnly } from "../agentPage";
 import { CommentBox } from "../leadership/common";
 import { useHome } from "../HomeState";
-import { card, Dropdown } from "../kit";
+import { NoDataCard, card, Dropdown } from "../kit";
 import { useCortexNav } from "../nav";
 import { AgentIcon } from "../primitives";
 import { useOutside } from "../shell";
@@ -212,6 +212,17 @@ function PlanIndex({ onOpen }: { onOpen: (id: "sep" | "oct") => void }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-cx-line">
+              {shown.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-5 py-8 text-center text-[12.5px] text-cx-faint">
+                    {all.length === 0 ? (
+                      <NoDataCard bare title="No plans from the backend" detail="The backend sent no plan months for this ASM yet." source="GET /api/web/sections/cortexHome · PLAN_MONTHS" />
+                    ) : (
+                      "No month in this period carries one of this Sales Executive's initiatives."
+                    )}
+                  </td>
+                </tr>
+              )}
               {shown.map((m) => {
                 const pct = m.estimateL && m.achievedL != null ? Math.round((m.achievedL / m.estimateL) * 100) : null;
                 const status = !m.created ? { label: "Draft · not generated", color: "#7c7f89" } : m.month === "Oct" ? { label: "Saved · starts 1 Oct", color: "#4f86f7" } : m.status === "progress" ? { label: "Locked · live", color: "#4f86f7" } : { label: "Closed", color: "#2fa85c" };
@@ -569,7 +580,16 @@ function PlanDetail({ planId, org, onBack }: { planId: "sep" | "oct"; org?: OrgP
               <tbody>
                 <tr>
                   <td colSpan={9} className="px-5 py-8 text-center text-[12.5px] text-cx-faint">
-                    No initiative matches these filters.
+                    {PLAN.length === 0 ? (
+                      <NoDataCard
+                        bare
+                        title="No initiatives in this plan"
+                        detail={`The backend sent no initiatives for ${scope.place} · ${meta.label}. Rows appear here once the workbook carries signals or targets for it.`}
+                        source={org ? `GET /api/web/sections/org · ORG_INITIATIVES[${org.id}]` : "GET /api/web/sections/map · SEP_INITIATIVES"}
+                      />
+                    ) : (
+                      "No initiative matches these filters."
+                    )}
                   </td>
                 </tr>
               </tbody>
@@ -601,7 +621,8 @@ function SinceLocked({ onClose, onItem }: { onClose: () => void; onItem: (id: st
   const { toast } = useHome();
   const head = useReadOnly();
   const n = SINCE_LOCKED.signals.length + SINCE_LOCKED.feedback.length;
-  const title = (id: string) => SEP_INITIATIVES.find((i) => i.id === id)!.title;
+  // a signal can point at a row the plan no longer carries; then it shows without its "On item" link
+  const title = (id: string) => SEP_INITIATIVES.find((i) => i.id === id)?.title;
   return (
     <section aria-label="New since this plan" className="overflow-hidden rounded-lg border border-[#e0b43a]/35 bg-[#e0b43a]/[0.05]">
       <div className="flex flex-wrap items-center gap-3 border-b border-[#e0b43a]/25 px-5 py-3">
@@ -616,6 +637,7 @@ function SinceLocked({ onClose, onItem }: { onClose: () => void; onItem: (id: st
       <div className="grid md:grid-cols-2">
         <div className="px-5 py-4">
           <p className="mb-2.5 text-[11.5px] text-cx-faint">Signals</p>
+          {SINCE_LOCKED.signals.length === 0 && <p className="text-[12.5px] text-cx-faint">No new signals since the plan was built.</p>}
           <ul className="space-y-3">
             {SINCE_LOCKED.signals.map((s) => (
               <li key={s.text} className="flex gap-3">
@@ -630,9 +652,11 @@ function SinceLocked({ onClose, onItem }: { onClose: () => void; onItem: (id: st
                     </button>
                   </p>
                   <p className="mt-0.5 text-[12.5px] leading-snug text-cx-muted">{s.text}</p>
-                  <button onClick={() => onItem(s.item)} className="mt-0.5 text-[12px] text-[#4f86f7] hover:underline">
-                    On item: {title(s.item)}
-                  </button>
+                  {title(s.item) && (
+                    <button onClick={() => onItem(s.item)} className="mt-0.5 text-[12px] text-[#4f86f7] hover:underline">
+                      On item: {title(s.item)}
+                    </button>
+                  )}
                 </div>
               </li>
             ))}
@@ -640,6 +664,7 @@ function SinceLocked({ onClose, onItem }: { onClose: () => void; onItem: (id: st
         </div>
         <div className="border-t border-[#e0b43a]/25 px-5 py-4 md:border-l md:border-t-0">
           <p className="mb-2.5 text-[11.5px] text-cx-faint">Sales Executive visit feedback · from SFA</p>
+          {SINCE_LOCKED.feedback.length === 0 && <p className="text-[12.5px] text-cx-faint">No visit feedback from SFA since the plan was built.</p>}
           <ul className="space-y-3">
             {SINCE_LOCKED.feedback.map((s) => (
               <li key={s.text}>
@@ -647,9 +672,11 @@ function SinceLocked({ onClose, onItem }: { onClose: () => void; onItem: (id: st
                   <span className="text-cx-text">{s.by}</span> <span className="text-cx-faint">at {s.at} · {s.when} · {s.kind}</span>
                 </p>
                 <p className="mt-0.5 text-[12.5px] leading-snug text-cx-muted">{s.text}</p>
-                <button onClick={() => onItem(s.item)} className="mt-0.5 text-[12px] text-[#4f86f7] hover:underline">
-                  On item: {title(s.item)}
-                </button>
+                {title(s.item) && (
+                  <button onClick={() => onItem(s.item)} className="mt-0.5 text-[12px] text-[#4f86f7] hover:underline">
+                    On item: {title(s.item)}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -792,20 +819,34 @@ function InitiativeRow({
  * homepage as a numbered item in "Needs your decision", with the plan row as its context.
  */
 function Escalate({ i, plan, open, onSent }: { i: Initiative; plan: { label: string }; open: boolean; onSent: () => void }) {
+  const nt = useAssignments();
+  const { toast } = useHome();
   const [text, setText] = useState("");
-  const [sent, setSent] = useState<{ text: string; id: string; key: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  /** set when it was sent from this page, so the agent run plays once */
+  const [runKey, setRunKey] = useState<number | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  // the backend holds the escalation, so it is still here after a reload and on every device
+  const stored = nt.escalations[i.id];
   useEffect(() => {
-    if (open && !sent) box.current?.focus();
-  }, [open, sent]);
-  if (!open && !sent) return null;
+    if (open && !stored) box.current?.focus();
+  }, [open, stored]);
+  if (!open && !stored) return null;
 
   const send = () => {
-    if (!text.trim()) return;
-    setSent({ text: text.trim(), id: `DEC-${118 + i.n}`, key: Date.now() });
-    setText("");
-    onSent();
+    const note = text.trim();
+    if (!note || busy) return;
+    setBusy(true);
+    nt.escalate({ source_id: i.id, kind: "plan", title: i.title, note, territory: i.territory, priority: i.priority })
+      .then(() => {
+        setText("");
+        setRunKey(Date.now());
+        onSent();
+      })
+      .catch((e: Error) => toast(`Couldn't escalate: ${e.message}`))
+      .finally(() => setBusy(false));
   };
+  const sent = stored ? { text: stored.note, id: stored.id, at: stored.at } : null;
 
   return (
     <div>
@@ -814,22 +855,32 @@ function Escalate({ i, plan, open, onSent }: { i: Initiative; plan: { label: str
         <div className="mt-1.5 space-y-1.5">
           <div className="rounded-lg border border-cx-line bg-cx-panel px-3.5 py-2.5">
             <p className="text-[12px]">
-              <span className="text-cx-text">You</span> <span className="text-cx-faint">· just now · to {LBL.headName}</span>
+              <span className="text-cx-text">You</span> <span className="text-cx-faint">· {runKey ? "just now" : sent.at} · to {LBL.headName}</span>
               <span className="ml-2 font-data text-[11px] text-[#4f86f7]">{sent.id}</span>
             </p>
             <p className="mt-0.5 text-[12.5px] leading-snug text-cx-text">{sent.text}</p>
           </div>
-          <AgentRunChip
-            key={sent.key}
-            run={{
-              agent: "map",
-              steps: ["attaching the plan row and its evidence", "checking it against the decision thresholds", `placing it in ${LBL.headName}'s queue`],
-              // no link: the decision sits on the Sales Head's homepage, which the ASM can't open
-              result: `${sent.id} is in ${LBL.headName}'s Needs your decision · ${i.priority} priority`,
-            }}
-            block
-          />
-          <p className="text-[11.5px] text-cx-faint">#{i.n} stays yours until they answer. The answer lands back on this row.</p>
+          {runKey && (
+            <AgentRunChip
+              key={runKey}
+              run={{
+                agent: "map",
+                steps: ["attaching the plan row and its evidence", "checking it against the decision thresholds", `placing it in ${LBL.headName}'s queue`],
+                // no link: the decision sits on the Sales Head's homepage, which the ASM can't open
+                result: `${sent.id} is in ${LBL.headName}'s Needs your decision · ${i.priority} priority`,
+              }}
+              block
+            />
+          )}
+          <p className="flex flex-wrap items-center gap-x-3 text-[11.5px] text-cx-faint">
+            #{i.n} stays yours until they answer. The answer lands back on this row.
+            <button
+              onClick={() => nt.withdraw(i.id).then(() => toast(`${sent.id} withdrawn from ${LBL.headName}'s queue.`)).catch((e: Error) => toast(`Couldn't withdraw: ${e.message}`))}
+              className="text-cx-muted hover:text-cx-text"
+            >
+              Withdraw
+            </button>
+          </p>
         </div>
       ) : (
         <form
@@ -859,8 +910,8 @@ function Escalate({ i, plan, open, onSent }: { i: Initiative; plan: { label: str
           />
           <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-2">
             <span className="pl-1 text-[11px] text-cx-faint">Goes with {plan.label} · #{i.n}</span>
-            <button type="submit" disabled={!text.trim()} className="inline-flex h-7 items-center rounded-md bg-[#2f6fed] px-2.5 text-[12px] font-medium text-white hover:bg-[#4f86f7] disabled:opacity-40">
-              Escalate
+            <button type="submit" disabled={!text.trim() || busy} className="inline-flex h-7 items-center rounded-md bg-[#2f6fed] px-2.5 text-[12px] font-medium text-white hover:bg-[#4f86f7] disabled:opacity-40">
+              {busy ? "Escalating…" : "Escalate"}
             </button>
           </div>
         </form>
@@ -1007,7 +1058,9 @@ function RowActions({
       : { label: "Send to Tracker", sub: `Creates a ticket for ${i.owner}`, run: send },
     { label: "Comment", sub: `Creates a ticket for ${i.owner}`, run: onComment },
     // the one call that leaves the ASM's hands: above their authority, or theirs to escalate
-    { label: "Escalate to Sales Head", sub: `Raises it to ${LBL.headName} as a decision`, run: onEscalate },
+    nt.escalations[i.id]
+      ? { label: `${nt.escalations[i.id].id} · with ${LBL.headName}`, sub: "Escalated · open the row to see it or withdraw it", run: onEscalate }
+      : { label: "Escalate to Sales Head", sub: `Raises it to ${LBL.headName} as a decision`, run: onEscalate },
   ];
   return (
     <div ref={ref} className="relative">

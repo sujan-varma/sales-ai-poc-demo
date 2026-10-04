@@ -77,7 +77,7 @@ import { MapPanel } from "./sections";
 import { AgentIcon, CortexMark, StatusBadge } from "./primitives";
 import { CortexPageRoot, PageFrame, Persona, useOutside } from "./shell";
 import { assignToast, assignmentLine, useAssignments } from "./assignments";
-import { DemoScopeChip, FeedSheet } from "./feedSheet";
+import { DemoScopeChip, FeedEmpty, FeedSheet } from "./feedSheet";
 import { DEMO_SCENARIO, useDemoScope } from "@/data/demo";
 import { useCortexNav } from "./nav";
 import { useAsmNav } from "./asmNav";
@@ -692,13 +692,16 @@ function InsightsCard() {
           </span>
         }
       />
-      {/* two full lines, then "View more" */}
-      <p className={`mt-3 text-[13.5px] leading-relaxed text-cx-text ${summaryOpen ? "" : "line-clamp-2"}`}>
-        {INSIGHTS_SUMMARY.text}
-      </p>
-      <button onClick={() => setSummaryOpen((o) => !o)} className="mt-0.5 self-start text-[11.5px] text-cx-muted hover:text-cx-text">
-        {summaryOpen ? "View less" : "View more"}
-      </button>
+      {/* two full lines, then "View more" — no summary without insights to summarise */}
+      {INSIGHTS.length > 0 && (
+        <>
+          <p className={`mt-3 text-[13.5px] leading-relaxed text-cx-text ${summaryOpen ? "" : "line-clamp-2"}`}>{INSIGHTS_SUMMARY.text}</p>
+          <button onClick={() => setSummaryOpen((o) => !o)} className="mt-0.5 self-start text-[11.5px] text-cx-muted hover:text-cx-text">
+            {summaryOpen ? "View less" : "View more"}
+          </button>
+        </>
+      )}
+      {scoped.length === 0 && <FeedEmpty total={INSIGHTS.length} what="insights" source="GET /api/web/sections/cortexHome · INSIGHTS" />}
       <ul className="mt-3">
         {scoped.slice(0, 3).map((ins) => (
           <li id={ins.id} key={ins.id} className={`border-t border-cx-line py-4 ${ins.isNew ? newRow : ""}`}>
@@ -1154,6 +1157,7 @@ function SinceMorningCard() {
           </span>
         }
       />
+      {rows.length === 0 && <FeedEmpty total={today.length} what="Huddle findings today" source="GET /api/web/sections/cortexHome · FINDINGS" />}
       <ul className="mt-3">
         {rows.map((f) => (
           <li id={f.id} key={f.id} className={`group/f border-t border-cx-line py-4 first:border-t-0 ${f.isNew ? newRow : ""}`}>
@@ -1331,6 +1335,7 @@ function RouteButtons({
   onRouted?: (k: RecRoute) => void;
 }) {
   const { routes, toggleRoute, toast } = useHome();
+  const esc = useRecEscalation();
   const key = routeKey ?? r.id;
   const active = role === "head" ? HEAD_REC_ROUTES[r.id] ?? [] : routes[key] ?? [];
 
@@ -1338,7 +1343,8 @@ function RouteButtons({
     <div className="flex flex-wrap items-center gap-1.5">
       {(role === "head" ? OWN_ROUTES : [...OWN_ROUTES, ESCALATE_ROUTE]).map((k) => {
         const m = ROUTE_META[k];
-        const on = active.includes(k);
+        // an escalation is the backend's record, not page state
+        const on = k === ESCALATE_ROUTE ? esc.on(r) : active.includes(k);
         const Icon = on ? Check : m.icon;
         if (role === "head") {
           return (
@@ -1357,6 +1363,7 @@ function RouteButtons({
             key={k}
             aria-pressed={on}
             onClick={() => {
+              if (k === ESCALATE_ROUTE) return esc.toggle(r);
               toggleRoute(key, k);
               if (!on && onRouted) onRouted(k);
               else toast(on ? `#${r.n} ${routeUndo(k)}` : `#${r.n}: ${m.done(r)}.`);
@@ -1376,13 +1383,37 @@ function RouteButtons({
   );
 }
 
-/** What each destination's agent does, shown as it works. */
-function routeRun(r: Recommendation, k: RecRoute): AgentRun {
+/**
+ * Escalate to Sales Head, for a recommendation: stored by the backend (POST /api/tracker/escalate) with a DEC-n id,
+ * so it reaches the Head of Sales's Needs your decision and is still there after a reload. Taking it back withdraws it.
+ */
+function useRecEscalation() {
+  const nt = useAssignments();
+  const { toast } = useHome();
+  return {
+    on: (r: Recommendation) => !!nt.escalations[r.id],
+    toggle: (r: Recommendation, onRun?: (run: AgentRun) => void) => {
+      if (nt.escalations[r.id]) {
+        const id = nt.escalations[r.id].id;
+        nt.withdraw(r.id)
+          .then(() => toast(`#${r.n}: ${id} ${routeUndo(ESCALATE_ROUTE)}`))
+          .catch((e: Error) => toast(`Couldn't withdraw: ${e.message}`));
+        return;
+      }
+      nt.escalate({ source_id: r.id, kind: "recommendation", title: r.title, territory: r.territory, note: `Decide on recommendation #${r.n}: ${r.title}` })
+        .then((e) => (onRun ? onRun(routeRun(r, ESCALATE_ROUTE, e.id)) : toast(`#${r.n}: ${e.id} is in ${LBL.headName}'s Needs your decision.`)))
+        .catch((e: Error) => toast(`Couldn't escalate: ${e.message}`));
+    },
+  };
+}
+
+/** What each destination's agent does, shown as it works. `decId` is the stored escalation's id. */
+function routeRun(r: Recommendation, k: RecRoute, decId?: string): AgentRun {
   if (k === "tracker") return { agent: "thermometer", steps: ["creating the action", "suggesting an owner"], result: `Added to Tracker — ${r.territory} queue`, link: "View in Tracker" };
   if (k === "map") return { agent: "map", steps: ["opening the October draft", "adding a suggested initiative"], result: "Added to the October plan as a suggested initiative", link: "View plan" };
   if (k === "head")
     // no link: the decision lands on the Sales Head's homepage, which the ASM can't open
-    return { agent: "thermometer", steps: ["attaching the signal and its evidence", "checking it against the decision thresholds", `placing it in ${LBL.headName}'s queue`], result: `DEC-${120 + r.n} is in ${LBL.headName}'s Needs your decision — ${r.territory}` };
+    return { agent: "thermometer", steps: ["attaching the signal and its evidence", "checking it against the decision thresholds", `placing it in ${LBL.headName}'s queue`], result: `${decId ?? "It"} is in ${LBL.headName}'s Needs your decision — ${r.territory}` };
   return { agent: "pitch", steps: ["updating priorities", "plan modified"], result: `Updated pitch priorities for ${r.pitchFor} — ${r.outlets} outlet${r.outlets === 1 ? "" : "s"} affected`, link: "View pitch" };
 }
 
@@ -1404,9 +1435,10 @@ function linkedRec(target: string): Recommendation | undefined {
  *  Plan · Send to Pitch, then Escalate to Sales Head below a divider. */
 function ActionsDropdown({ routeKey, rec, onRun }: { routeKey: string; rec: Recommendation; onRun: (run: AgentRun) => void }) {
   const { routes, toggleRoute, toast } = useHome();
+  const esc = useRecEscalation();
   const [open, setOpen] = useState(false);
   const ref = useOutside<HTMLDivElement>(open, () => setOpen(false));
-  const active = routes[routeKey] ?? [];
+  const active = [...(routes[routeKey] ?? []).filter((k) => k !== ESCALATE_ROUTE), ...(esc.on(rec) ? [ESCALATE_ROUTE] : [])];
   return (
     <div className="shrink-0">
       <div ref={ref} className="relative">
@@ -1433,8 +1465,9 @@ function ActionsDropdown({ routeKey, rec, onRun }: { routeKey: string; rec: Reco
                   role="menuitemcheckbox"
                   aria-checked={on}
                   onClick={() => {
-                    toggleRoute(routeKey, k);
                     setOpen(false);
+                    if (up) return esc.toggle(rec, onRun);
+                    toggleRoute(routeKey, k);
                     if (on) toast(`#${rec.n} ${routeUndo(k)}`);
                     else onRun(routeRun(rec, k));
                   }}

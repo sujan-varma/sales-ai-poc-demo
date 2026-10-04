@@ -17,7 +17,7 @@ import { TraceTrigger } from "../actionTrace";
 import { AiTag } from "../ai";
 import { AsmAgentPage, PriorityPill, btnPrimary } from "../agentPage";
 import { useHome } from "../HomeState";
-import { card, Dropdown } from "../kit";
+import { NoDataCard, card, Dropdown } from "../kit";
 import { useCortexNav } from "../nav";
 import { AgentIcon } from "../primitives";
 import { MarketSheet, SheetButtons, SheetId } from "./MarketSheet";
@@ -435,7 +435,16 @@ function DraftCanvas({
             {rows.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-5 py-8 text-center text-[12.5px] text-cx-faint">
-                  No draft initiative matches these filters. Clear one to see the rest of the plan.
+                  {OCT_DRAFT.length === 0 ? (
+                    <NoDataCard
+                      bare
+                      title="Nothing to draft"
+                      detail="The backend sent no October draft initiatives: September leaves nothing open and no territory has unvisited retailers."
+                      source="GET /api/web/sections/map · OCT_DRAFT"
+                    />
+                  ) : (
+                    "No draft initiative matches these filters. Clear one to see the rest of the plan."
+                  )}
                 </td>
               </tr>
             )}

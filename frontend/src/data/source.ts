@@ -47,6 +47,13 @@ export async function fetchWorkbookLoadedAt(): Promise<string | undefined> {
   return (await getJson<{ loaded_at?: string }>("/api/web/sections")).loaded_at;
 }
 
+/** An export the backend may not send (an older backend, or a section with nothing in it): `fallback` instead of a
+ *  throw, so the page shows its "No data" card rather than failing to load. */
+export function DOpt<T>(module: string, key: string, fallback: T): T {
+  const mod = globalThis.__CORTEX_DATA__?.[module];
+  return mod && key in mod && mod[key] != null ? (mod[key] as T) : fallback;
+}
+
 export function dataGaps() {
   return globalThis.__CORTEX_DATA__?.data_gaps ?? [];
 }

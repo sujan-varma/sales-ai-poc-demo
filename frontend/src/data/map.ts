@@ -81,6 +81,8 @@ export interface Initiative {
   attachments: number;
   comments: { who: string; at: string; text: string; ticket?: string }[];
   visit?: { by: string; at: string; when: string; state: string; note: string };
+  /** open escalation to the Head of Sales, from the backend (POST /api/tracker/escalate) */
+  escalation?: { id: string; note: string; at: string; to: string };
 }
 
 export const SEP_PLAN = M<{ id: string; label: string; scope: string; version: string; locked: string; lockedShort: string; agreedOn: string; history: string }>("SEP_PLAN");

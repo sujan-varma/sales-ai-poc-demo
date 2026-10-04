@@ -9,7 +9,7 @@
 
 import type { AgentId } from "./cortexHome";
 import { REGIONS } from "./leadership";
-import { D } from "./source";
+import { D, DOpt } from "./source";
 
 const Th = <T,>(key: string) => D<T>("thermometer", key);
 
@@ -24,7 +24,7 @@ export const CUR = 5;
 export const AS_OF = Th<{ day: number; days: number; label: string }>("AS_OF");
 export const SYNC_NOTE = Th<string>("SYNC_NOTE");
 /** What the Sync control reads, in order: the workbook sheets behind Thermometer, then the agents feeding it. */
-export const SYNC_FEEDS = Th<{ label: string; doing: string; agent?: AgentId }[]>("SYNC_FEEDS");
+export const SYNC_FEEDS = DOpt<{ label: string; doing: string; agent?: AgentId }[]>("thermometer", "SYNC_FEEDS", []);
 /** Huddle sheet themes about competitors and partners switching (quoted as evidence) */
 export const HUDDLE_SIGNALS = Th<{ n: number; theme: string; urgency: string | null; session: string | null; switching: boolean }[]>("HUDDLE_SIGNALS");
 export const FY_LABEL = "FY 2026–27";

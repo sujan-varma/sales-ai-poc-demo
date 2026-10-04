@@ -12,9 +12,9 @@ import { EMPTY_SESSION, PITCH_STATUS, Pitch, kpisFor, pitchTrace, pitchesFor, po
 import { MAP_LABELS } from "@/data/map";
 import { ORG_PITCHES } from "@/data/org";
 import { TraceTrigger } from "../actionTrace";
-import { AgentPersona, AsmAgentPage, DotStatus, PriorityPill, btn, btnPrimary, useReadOnly } from "../agentPage";
+import { AgentPageHeader, AgentPersona, AsmAgentPage, DotStatus, PriorityPill, btn, btnPrimary, useReadOnly } from "../agentPage";
 import { useHome } from "../HomeState";
-import { card, Dropdown } from "../kit";
+import { NoDataCard, card, Dropdown } from "../kit";
 import { useCortexNav } from "../nav";
 import { AgentIcon } from "../primitives";
 import { PitchOrigin, PointsTable, getOpenPitch, getPitchOrigin, setAdhocOutlet } from "./parts";
@@ -51,6 +51,27 @@ function Detail() {
     setOrigin(getPitchOrigin());
   }, [head]);
   const p = pitches.find((x) => x.id === id) ?? pitches[0];
+  if (!p)
+    return (
+      <div className="pb-24">
+        <AgentPageHeader agent="pitch" title="Pitch" meta="One pitch, as the Sales Executive runs it in SFA" back={{ label: "Pitch", page: head ? "pitch-head" : "pitch" }} />
+        <div className="px-4 sm:px-6">
+          <NoDataCard
+            title="No pitch to show"
+            detail="The backend sent no pitches: no plan initiative has reached an outlet yet. A pitch appears once a plan pushes an initiative to an outlet."
+            source={head ? "GET /api/web/sections/org · ORG_PITCHES" : "GET /api/web/sections/pitch"}
+          />
+        </div>
+      </div>
+    );
+  return <PitchView p={p} origin={origin} />;
+}
+
+/** One pitch that exists — split from <Detail> so its hooks never run on an empty list. */
+function PitchView({ p, origin }: { p: Pitch; origin: PitchOrigin | null }) {
+  const go = useCortexNav();
+  const { toast } = useHome();
+  const head = useReadOnly();
   const asm = p.asm ?? MAP_LABELS.asm;
   const [accepted, setAccepted] = useState<string[]>([]);
   const [dismissed, setDismissed] = useState(false);

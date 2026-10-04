@@ -37,7 +37,7 @@ function closestOption(d: Decision, text: string) {
   const words = new Set(text.toLowerCase().match(/[a-z0-9]+/g) ?? []);
   const scored = d.options.map((o) => ({ o, n: (o.label.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((w) => w.length > 2 && words.has(w)).length }));
   const best = scored.sort((a, b) => b.n - a.n)[0];
-  return best.n > 0 ? best.o : d.options.find((o) => o.recommended)!;
+  return best.n > 0 ? best.o : d.options.find((o) => o.recommended) ?? d.options[0];
 }
 
 function FreeText({ d, onSend, onCancel }: { d: Decision; onSend: (optionId: string, note: string) => void; onCancel: () => void }) {
@@ -214,7 +214,7 @@ function DecisionRow({ d }: { d: Decision }) {
   const [runs, setRuns] = useState<{ run: AgentRun; key: number }[]>([]);
   const r = replies[d.id];
   const chosen = r && d.options.find((o) => o.id === r.optionId)!;
-  const rec = d.options.find((o) => o.recommended)!;
+  const rec = d.options.find((o) => o.recommended) ?? d.options[0];
   const from = TODAY_ACTIVITY.find((e) => e.decision === d.n);
 
   const answer = (optionId: string, note?: string) => {

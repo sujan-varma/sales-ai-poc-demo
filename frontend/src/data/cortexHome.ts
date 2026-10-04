@@ -1,7 +1,7 @@
 // ASM / Sales Head homepage data. Types and UI configuration live here; every data value comes from the
 // backend (GET /api/web/bootstrap → "cortexHome"), built from the Excel workbook. See ./source.ts.
 
-import { D } from "./source";
+import { D, DOpt } from "./source";
 
 export type AgentId = "huddle" | "thermometer" | "map" | "pitch";
 export type ActionStatus = "done" | "progress" | "delayed" | "unassigned";
@@ -396,4 +396,21 @@ export const PLAN_RUN = C<AgentRun>("PLAN_RUN");
 export const FINDING_ACTIONS = C<Record<string, ItemAction>>("FINDING_ACTIONS");
 
 /** The walkthrough thread the cards narrow to while demo scope is on, chosen by the backend. */
-export const DEMO_SCENARIO_DATA = C<{ id: string; name: string; short: string; insights: string[]; findings: string[]; leadInsights: string[] }>("DEMO_SCENARIO");
+export const DEMO_SCENARIO_DATA = DOpt<{ id: string; name: string; short: string; insights: string[]; findings: string[]; leadInsights: string[] }>("cortexHome", "DEMO_SCENARIO", {
+  id: "none",
+  name: "No walkthrough thread",
+  short: "Thread",
+  insights: [],
+  findings: [],
+  leadInsights: [],
+});
+
+/** An item the ASM escalated to the Head of Sales, stored by the backend (POST /api/tracker/escalate). */
+export interface Escalation {
+  id: string;
+  note: string;
+  at: string;
+  to: string;
+}
+/** Open escalations by the item they came from (a recommendation or plan row id), as on page load. */
+export const ESCALATIONS = DOpt<Record<string, Escalation>>("cortexHome", "ESCALATIONS", {});

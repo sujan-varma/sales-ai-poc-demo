@@ -7,9 +7,10 @@
 
 import type { Pitch, OutletType, TalkingPoint } from "./pitch";
 import { Initiative, MAP_LABELS, SEP_INITIATIVES, registerInitiatives } from "./map";
-import { D } from "./source";
+import { DOpt } from "./source";
 
-const O = <T,>(key: string) => D<T>("org", key);
+// Optional: an older backend has no `org` section, and then the org pages show their "No data" card.
+const O = <T,>(key: string, fallback: T) => DOpt<T>("org", key, fallback);
 
 // ---------------------------------------------------------------------------
 // The roster: Sales Executives under every ASM
@@ -23,7 +24,7 @@ export interface OrgExec {
 }
 
 /** One row per officer per ASM: an officer serving two ASMs in the workbook appears under each. */
-export const ORG_EXECS = O<OrgExec[]>("ORG_EXECS");
+export const ORG_EXECS = O<OrgExec[]>("ORG_EXECS", []);
 export const execsOf = (region: string) => ORG_EXECS.filter((e) => e.region === region);
 /** distinct people, not rows */
 export const ORG_SE_COUNT = new Set(ORG_EXECS.map((e) => e.name)).size;
@@ -49,12 +50,12 @@ export interface OrgPlan {
   note: string;
 }
 
-export const ORG_PLANS = O<OrgPlan[]>("ORG_PLANS");
+export const ORG_PLANS = O<OrgPlan[]>("ORG_PLANS", []);
 export const orgPlan = (id: string) => ORG_PLANS.find((p) => p.id === id);
 /** the viewing ASM's region, as the org plans name it */
 export const OWN_REGION = ORG_PLANS.find((p) => p.asm === MAP_LABELS.asm)?.region ?? MAP_LABELS.region;
 
-const INITIATIVES = O<Record<string, Initiative[]>>("ORG_INITIATIVES");
+const INITIATIVES = O<Record<string, Initiative[]>>("ORG_INITIATIVES", {});
 for (const rows of Object.values(INITIATIVES)) registerInitiatives(rows);
 
 /** A plan's rows. The viewing ASM's September is the live one in `map`, with its tickets applied. */
@@ -69,11 +70,11 @@ export function orgInitiatives(planId: string): Initiative[] {
 // ---------------------------------------------------------------------------
 
 /** Each carries the ASM and region it was built for (officers can serve more than one ASM). */
-export const ORG_PITCHES = O<(Pitch & { asm: string; region: string })[]>("ORG_PITCHES");
-export const ORG_OUTLETS = O<Record<string, { type: OutletType; territory: string; code: string }>>("ORG_OUTLETS");
-export const ORG_KPIS = O<Record<string, { value: string; target: string; outstanding: string; skus: string }>>("ORG_KPIS");
-export const ORG_POINTS = O<Record<string, Omit<TalkingPoint, "n">[]>>("ORG_POINTS");
-export const ORG_PLAN_LINES = O<Record<string, string>>("ORG_PLAN_LINES");
+export const ORG_PITCHES = O<(Pitch & { asm: string; region: string })[]>("ORG_PITCHES", []);
+export const ORG_OUTLETS = O<Record<string, { type: OutletType; territory: string; code: string }>>("ORG_OUTLETS", {});
+export const ORG_KPIS = O<Record<string, { value: string; target: string; outstanding: string; skus: string }>>("ORG_KPIS", {});
+export const ORG_POINTS = O<Record<string, Omit<TalkingPoint, "n">[]>>("ORG_POINTS", {});
+export const ORG_PLAN_LINES = O<Record<string, string>>("ORG_PLAN_LINES", {});
 
 // ---------------------------------------------------------------------------
 // Flagged, and the org-wide roll-up the Head of Sales's index shows

@@ -13,7 +13,7 @@ import { ArrowRight } from "lucide-react";
 import { ORG_PLANS, ORG_SE_COUNT, OWN_REGION, OrgPlan, execsOf, orgInitiatives, orgStats } from "@/data/org";
 import { REGIONS, TERRITORY_COUNT } from "@/data/leadership";
 import { AgentPageHeader, DotStatus } from "../agentPage";
-import { card, Dropdown } from "../kit";
+import { NoDataCard, card, Dropdown } from "../kit";
 import { SummaryRow } from "./SummaryRow";
 import { periodDetail, periodMonths, usePeriod } from "../period";
 import { useOctPlan } from "./octPlan";
@@ -102,6 +102,15 @@ export function OrgPlanIndex({ onOpen }: { onOpen: (plan: OrgPlan) => void }) {
           </>
         }
       />
+      {ORG_PLANS.length === 0 ? (
+        <div className="px-4 sm:px-6">
+          <NoDataCard
+            title="No plan data from the backend"
+            detail="The backend sent no org-wide plans, so there is nothing to show here yet. Restart the backend on the current code, or check that the workbook has targets and sales for the ASMs."
+            source="GET /api/web/sections/org · ORG_PLANS"
+          />
+        </div>
+      ) : (
       <div className="space-y-5 px-4 sm:px-6">
         <div className="flex flex-wrap items-center gap-1.5">
           <Dropdown label="Region" value={region} options={REGIONS.map((r) => r.name)} onChange={pickRegion} placeholder={`All ${REGIONS.length}`} />
@@ -174,6 +183,7 @@ export function OrgPlanIndex({ onOpen }: { onOpen: (plan: OrgPlan) => void }) {
           <MonthBand key={month} month={month} rows={rows.filter((p) => p.month === month)} onOpen={onOpen} />
         ))}
       </div>
+      )}
     </div>
   );
 }

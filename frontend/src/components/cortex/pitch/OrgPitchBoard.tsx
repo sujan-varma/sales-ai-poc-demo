@@ -20,7 +20,7 @@ import { MAP_LABELS } from "@/data/map";
 import { ORG_EXECS, ORG_PITCHES, ORG_SE_COUNT, OWN_REGION, OrgExec } from "@/data/org";
 import { EMPTY_SESSION, Pitch, outstandingCount, pitchesFor } from "@/data/pitch";
 import { AgentPageHeader } from "../agentPage";
-import { card, Dropdown } from "../kit";
+import { NoDataCard, card, Dropdown } from "../kit";
 import { SePitches } from "./SePitches";
 
 const ASMS = REGIONS.map((r) => `${r.asm} · ${r.name}`);
@@ -121,6 +121,15 @@ export function OrgPitchBoard({ onOpen }: { onOpen: (p: Pitch) => void }) {
         </p>
       </AgentPageHeader>
 
+      {pitches.length === 0 ? (
+        <div className="px-4 sm:px-6">
+          <NoDataCard
+            title="No pitch data from the backend"
+            detail="No ASM's September plan has pushed a pitch yet, or the backend sent no pitch data. Pitches appear here once a plan's initiatives reach outlets."
+            source="GET /api/web/sections/org · ORG_PITCHES, /sections/pitch"
+          />
+        </div>
+      ) : (
       <div className="space-y-6 px-4 sm:px-6">
         <div className="flex flex-wrap items-center gap-1.5">
           <Dropdown label="Region" value={region} options={REGIONS.map((r) => r.name)} onChange={setRegion} placeholder={`All ${REGIONS.length}`} />
@@ -195,6 +204,7 @@ export function OrgPitchBoard({ onOpen }: { onOpen: (p: Pitch) => void }) {
           {regions.length === 0 && <p className="px-5 py-10 text-center text-[12.5px] text-cx-faint">No ASM matches these filters.</p>}
         </section>
       </div>
+      )}
     </div>
   );
 }

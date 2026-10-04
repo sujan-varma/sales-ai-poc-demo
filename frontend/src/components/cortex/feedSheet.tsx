@@ -7,7 +7,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Filter, X } from "lucide-react";
 import { DEMO_SCENARIO, useDemoScope } from "@/data/demo";
-import { Dropdown } from "./kit";
+import { Dropdown, NoDataCard } from "./kit";
 
 /** One filter in the drawer: a label and how to read its value off an item. */
 export interface Facet<T> {
@@ -116,7 +116,12 @@ export function FeedSheet<T>({
           </div>
         </div>
         <ol className="min-h-0 flex-1 overflow-y-auto px-9 py-2 max-md:px-5">
-          {rows.length === 0 && (
+          {items.length === 0 && (
+            <li>
+              <NoDataCard bare title="No data yet" detail="The backend sent nothing for this list on the current data date." />
+            </li>
+          )}
+          {items.length > 0 && rows.length === 0 && (
             <li className="px-3 py-16 text-center text-[13px] text-cx-faint">
               Nothing matches these filters.{" "}
               <button
@@ -144,6 +149,23 @@ export function FeedSheet<T>({
         </ol>
       </aside>
     </div>
+  );
+}
+
+/**
+ * What a feed card shows in place of its list: the "No data" card when the backend sent nothing, or — when there is
+ * data but the walkthrough thread holds none of it — one line that turns the thread off.
+ */
+export function FeedEmpty({ total, what, source }: { total: number; what: string; source: string }) {
+  const [, setScope] = useDemoScope();
+  if (total === 0) return <NoDataCard bare title={`No ${what} yet`} detail={`The backend sent no ${what} for the current data date.`} source={source} />;
+  return (
+    <p className="border-t border-cx-line py-6 text-center text-[12.5px] text-cx-faint">
+      Nothing in {DEMO_SCENARIO.short} ·{" "}
+      <button onClick={() => setScope(false)} className="text-[#4f86f7] hover:underline">
+        Show all {total}
+      </button>
+    </p>
   );
 }
 

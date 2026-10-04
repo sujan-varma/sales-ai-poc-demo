@@ -84,6 +84,9 @@ On a list endpoint, `total` is the number of rows matching the search and filter
 | POST | `/api/tracker/actions/{id}/review` | – | `{ by, decision: verify\|send_back, note? }` from the web Tracker. For an officer's own field action add `so`, `retailer_id`, `signal`. Notifies the officer |
 | POST | `/api/tracker/actions/{id}/comment` | – | `{ by, text }` (same extra fields for a field action). The ASM's comment, shown in the officer's app |
 | POST | `/api/app/visits/{id}/events` | – | `{ so, type: checkin\|checkout, retailer_id }` from the app. Kept in `tracker.json`, so a reload keeps the visit checked in; cleared by *Reset for demo* |
+| POST | `/api/tracker/escalate` | – | `{ source_id, kind: plan\|recommendation, title, by, note, territory?, priority? }`. The ASM escalates a plan row or recommendation to the Head of Sales; stored as `DEC-n` and shown in *Needs your decision* (and on the ASM's row) until withdrawn. The same open item again returns the open one |
+| GET | `/api/tracker/escalations?by=Raman` | – | Open escalations, newest first |
+| POST | `/api/tracker/escalations/{id}/withdraw` | – | `{ by }`. The ASM takes an open escalation back. *Reset for demo* also clears that ASM's escalations |
 | POST | `/api/tracker/reminders/run` | API key | Sends due-today / overdue reminders for open assigned actions, once per action per day |
 | POST | `/api/tracker/reset?assigned_by=Raman` | – (API key without `assigned_by`) | The web's *Reset for demo*: clears that ASM's assigned actions and the notifications in the mobile app, so the Action Tracker items (*Suggested by Sales AI*, *Needs an owner*) can be assigned again. See [Reset for testing](#reset-for-testing) |
 | GET | `/api/web/bootstrap?asm=Raman` | – | Everything the Cortex web app (Next.js) shows, built from the workbook; `data.data_gaps` lists what's missing |
