@@ -266,14 +266,15 @@ function AgentRail({ expanded, setExpanded, persona, configActive, activeAgent }
           {AGENT_ORDER.map((a) => (
             <li key={a} className="group/tip relative">
               <button
-                // Thermometer has a page for both personas; MAP and Pitch are the ASM's.
+                // Thermometer, MAP and Pitch each have a page for both personas — the Head of
+                // Sales gets the read-only view, where the only action is a comment.
                 // Huddle opens its Intel Hub (the ASM's huddles; the Head of Sales lands on the same page).
                 onClick={() => {
-                  if (a === "thermometer") go(persona === "head" ? "thermometer-head" : "thermometer");
-                  else if (a === "map" && persona === "asm") go("map-plans");
-                  else if (a === "pitch" && persona === "asm") go("pitch");
-                  else if (a === "huddle") go("huddle");
-                  else toast(`${AGENTS[a].name} is the ASM's agent; the Head of Sales sees it through the roll-ups.`);
+                  const head = persona === "head";
+                  if (a === "thermometer") go(head ? "thermometer-head" : "thermometer");
+                  else if (a === "map") go(head ? "map-head" : "map-plans");
+                  else if (a === "pitch") go(head ? "pitch-head" : "pitch");
+                  else go("huddle");
                 }}
                 aria-label={`${AGENTS[a].name} agent`}
                 aria-current={activeAgent === a ? "page" : undefined}

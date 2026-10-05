@@ -104,6 +104,20 @@ class AssignRequest(BaseModel):
     note: Optional[str] = Field(default=None, max_length=500)
 
 
+class EscalateRequest(BaseModel):
+    source_id: str = Field(min_length=1, description="What is escalated in the web app: a plan initiative id or a recommendation id", examples=["i-range-bhavnagar", "rec-3"])
+    kind: Literal["plan", "recommendation"]
+    title: str = Field(min_length=1, max_length=300)
+    by: str = Field(min_length=1, description="The ASM raising it", examples=["Raman"])
+    note: str = Field(min_length=1, max_length=1000, description="What the ASM needs the Head of Sales to decide")
+    territory: Optional[str] = None
+    priority: Optional[Literal["High", "Medium", "Low"]] = None
+
+
+class WithdrawRequest(BaseModel):
+    by: str = Field(min_length=1, examples=["Raman"])
+
+
 class VisitEvent(BaseModel):
     so: str = Field(min_length=1, description="The sales officer", examples=["SO018"])
     type: Literal["checkin", "checkout"]

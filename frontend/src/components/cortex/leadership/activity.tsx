@@ -15,7 +15,7 @@ import { ACTIVITY, ACTIVITY_DAYS, ActivityEntry, DECISIONS, Destination, LIVE_EN
 import { card, CardHeader, Dropdown, Eyebrow } from "../kit";
 import { useCortexNav } from "../nav";
 import { AgentIcon } from "../primitives";
-import { TraceTooltip } from "../actionTrace";
+import { TraceTrigger } from "../actionTrace";
 import { useRange } from "./common";
 
 export const DEST_META: Record<Destination, { color: string; icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>; short: string }> = {
@@ -446,7 +446,7 @@ export function ActivityLogTable({ fixedRegion, scopeLabel }: { fixedRegion?: st
                         </span>
                       </td>
                       <td className={`${td} pr-5`}>
-                        <TraceTooltip trace={entryTrace(e)} compact />
+                        <TraceTrigger trace={entryTrace(e)} source="Activity" title={`${e.what} · ${e.territory ?? e.region}`} compact />
                       </td>
                     </tr>
                   );

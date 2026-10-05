@@ -61,7 +61,8 @@ def asm_user(name: str) -> str:
 # ---------------------------------------------------------------- store
 
 class TrackerStore:
-    EMPTY = {"seq": 1000, "actions": [], "notifications": [], "overrides": {}, "read": {}, "reminders": {}, "visits": {}}
+    EMPTY = {"seq": 1000, "actions": [], "notifications": [], "overrides": {}, "read": {}, "reminders": {}, "visits": {},
+             "escalations": [], "dec_seq": 100}
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -323,8 +324,49 @@ def reset(wb: Workbook, assigned_by: Optional[str] = None) -> dict[str, int]:
             del state["read"][k]
         for k in vis:
             del state["visits"][k]
+        e0 = len(state["escalations"])
+        state["escalations"] = [e for e in state["escalations"] if assigned_by and not push.same_user(e["by"], assigned_by)]
         state["epoch"] = state.get("epoch", 0) + 1
-        return {"actions": len(gone), "notifications": n0 - len(state["notifications"]), "overrides": len(ovs)}
+        return {"actions": len(gone), "notifications": n0 - len(state["notifications"]), "overrides": len(ovs), "escalations": e0 - len(state["escalations"])}
+
+
+# ---------------------------------------------------------------- escalations to the Head of Sales
+
+def escalate(wb: Workbook, req: dict[str, Any]) -> dict[str, Any]:
+    """The ASM raises a plan row or a recommendation to the Head of Sales as a decision. Stored with a DEC-n id; it
+    shows in the Head of Sales's "Needs your decision" (web payload overlay) until withdrawn. Raising the same item
+    twice while it is open returns the open one (`created: false`)."""
+    if req["by"] not in _people(wb)["asms"]:
+        raise TrackerError(404, f"ASM '{req['by']}' is not in 4. Retailer_Master")
+    with get_store().edit() as state:
+        open_ = next((e for e in state["escalations"] if e["status"] == "open" and e["source_id"] == req["source_id"] and push.same_user(e["by"], req["by"])), None)
+        if open_:
+            return {"escalation": open_, "created": False}
+        state["dec_seq"] = state.get("dec_seq", 100) + 1
+        e = {"id": f"DEC-{state['dec_seq']}", "source_id": req["source_id"], "kind": req["kind"], "title": req["title"], "territory": req.get("territory"),
+             "priority": req.get("priority"), "note": req["note"], "by": req["by"], "created": _ms(), "status": "open"}
+        state["escalations"].append(e)
+        return {"escalation": e, "created": True}
+
+
+def withdraw_escalation(esc_id: str, by: str) -> dict[str, Any]:
+    with get_store().edit() as state:
+        e = next((e for e in state["escalations"] if e["id"] == esc_id), None)
+        if not e:
+            raise TrackerError(404, f"No escalation {esc_id}")
+        if not push.same_user(e["by"], by):
+            raise TrackerError(403, f"{esc_id} was raised by {e['by']}")
+        e.update(status="withdrawn", withdrawn=_ms())
+        return e
+
+
+def list_escalations(by: Optional[str] = None, status: Optional[str] = "open") -> list[dict[str, Any]]:
+    es = get_store().snapshot()["escalations"]
+    if by:
+        es = [e for e in es if push.same_user(e["by"], by)]
+    if status:
+        es = [e for e in es if e["status"] == status]
+    return sorted(es, key=lambda e: -e["created"])
 
 
 # ---------------------------------------------------------------- events from the app

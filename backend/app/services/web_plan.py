@@ -60,6 +60,8 @@ def _conf(n_sheets: int) -> int:
 PLAN_GAPS = [
     {"area": "Plan versions, locks and ASM targets",
      "detail": "No plan records. The September plan is built from workbook signals as v1; Agreed equals the AI Estimated figure because there are no ASM targets."},
+    {"area": "Plans before September",
+     "detail": "No plan records for April–August. A closed month's plan rows are its territory × category targets (9. Target Sales Value) against what was billed (8. Actual Sales Value); they sum to the month's plan figures."},
     {"area": "Market size in ₹",
      "detail": "'Data 11' gives shares in LPM, not rupees. The ₹ market is the company's Apr–Aug run-rate divided by its share; territories split their region's market by their distributors' retailer universe."},
     {"area": "Visit notes, pitch coverage, SFA timestamps",
@@ -382,11 +384,8 @@ def build(wb: Workbook, org: Any, ctx: dict[str, Any]) -> dict[str, Any]:
     for k, d in enumerate(OCT_DRAFT, start=1):
         d["id"] = f"d-{k}"
 
-    # ---- plan index extras: no plan history, so a month's "initiatives" is its under-target territory × category pairs
-    counts = []
-    for m in range(5):
-        counts.append(sum(1 for t in terrs for c in CAT_ORDER
-                          if (tg := sum(f["tgt"][c][m] for f in org.by_terr[t] if f["asm"] == A)) > 0 and sum(f["cy"][c][m] for f in org.by_terr[t] if f["asm"] == A) < 0.8 * tg))
+    # ---- plan index extras: no plan history, so a past month's plan rows are its territory × category targets
+    counts = [len(past_initiatives(org, A, exec_for, m, "count")) for m in range(5)]
 
     # ---- pitch
     def kpis(name: str) -> dict[str, str]:
@@ -610,6 +609,132 @@ def build(wb: Workbook, org: Any, ctx: dict[str, Any]) -> dict[str, Any]:
         "REACH": REACH, "REACH_TARGET": REACH_TARGET, "INFLUENCERS": INFLUENCERS, "data_gaps": PLAN_GAPS,
     }
     return {"map": MAP, "pitch": PITCH, "tracker": TRACKER, "story": {"LIVE_STORY": LIVE_STORY, "LAST_STORY": LAST_STORY}, "ticket_init": ticket_init}
+
+
+# ---------------------------------------------------------------- past months and the org-wide view
+
+MONTHS = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct"]
+MONTH_LONG = {"Apr": "April", "May": "May", "Jun": "June", "Jul": "July", "Aug": "August", "Sep": "September", "Oct": "October"}
+
+
+def _tie(vals: list[float], total: float) -> list[float]:
+    """Round each row to a tenth so the rows sum exactly to `total`: the largest row carries the residual."""
+    out = [round(v, 1) for v in vals]
+    if out:
+        big = out.index(max(out))
+        out[big] = round(out[big] + round(total - sum(out), 1), 1)
+    return out
+
+
+def past_initiatives(org: Any, A: str, exec_for: dict[str, str], m: int, plan_id: str) -> list[dict[str, Any]]:
+    """A closed month's plan rows. The workbook keeps no plan records before September, so each row is one territory ×
+    category target for that month (9. Target Sales Value) against what was billed (8. Actual Sales Value). The rows sum
+    exactly to the month's plan figures; priority follows the achievement (under 80% High, under 95% Medium)."""
+    month = MONTHS[m]
+    by_t: dict[str, list[dict]] = defaultdict(list)
+    for f in org.by_asm[A]:
+        by_t[f["terr"]].append(f)
+    order = [t for t in org.terr_by_asm[A] if t in by_t] + [t for t in by_t if t not in org.terr_by_asm[A]]
+    rows = []
+    for t in order:
+        fs = by_t[t]
+        kind = Counter(OUTLET_TYPE.get(f["type"], "Retailer") for f in fs).most_common(1)[0][0]
+        for c in CAT_ORDER:
+            tg, ac = sum(f["tgt"][c][m] for f in fs), sum(f["cy"][c][m] for f in fs)
+            if tg <= 0:
+                continue
+            p = ac / tg * 100
+            rows.append({"t": t, "c": c, "tg": tg, "ac": ac, "pct": p, "n": sum(1 for f in fs if f["tgt"][c][m] > 0), "kind": kind,
+                         "priority": "High" if p < 80 else "Medium" if p < 95 else "Low"})
+    rank = {"High": 0, "Medium": 1, "Low": 2}
+    rows.sort(key=lambda r: (rank[r["priority"]], -r["tg"]))
+    est = _tie([r["tg"] / 1e5 for r in rows], round(L(sum(r["tg"] for r in rows)), 1))
+    got = _tie([r["ac"] / 1e5 for r in rows], round(L(sum(r["ac"] for r in rows)), 1))
+    out = []
+    for n, (r, e, d) in enumerate(zip(rows, est, got), start=1):
+        out.append({
+            "id": f"{plan_id}-{_slug(r['t'])}-{_slug(r['c'])}", "n": n, "title": f"{r['c']}, {r['t']}", "lever": "Range selling", "channel": r["kind"],
+            "product": r["c"], "sector": "Trade", "territory": r["t"], "owner": exec_for.get(r["t"], A), "priority": r["priority"], "status": "closed",
+            "unit": "₹L", "est": e, "agreed": e, "delivered": d,
+            "description": f"{MONTH_LONG[month]} target for {r['c']} in {r['t']}: {inr(r['tg'])} across {r['n']} retailers. {inr(r['ac'])} was billed, {r['pct']:.0f}% of it.",
+            "steps": [f"Target set per retailer in 9. Target Sales Value ({MONTH_LONG[month]})", f"Billed per retailer in 8. Actual Sales Value · {r['pct']:.0f}% achieved", "Closed at month-end"],
+            "source": {"agent": "map", "ref": "9. Target vs 8. Actual Sales Value", "at": f"{MONTH_LONG[month]} month-end"},
+            "pitch": None, "attachments": 0, "comments": [],
+        })
+    return out
+
+
+def _initials(name: str) -> str:
+    """Same rule as web_data.initials (the REGIONS rows), so a plan row and its region show the same badge."""
+    p = str(name).split()
+    return (p[0][:1] + (p[-1][:1] if len(p) > 1 else p[0][1:2])).upper()
+
+
+def _pslug(s: str) -> str:
+    """The web app's pitch id slug (no trimming), so `p-{slug}` ids match the ones it builds itself."""
+    return re.sub(r"[^a-z0-9]+", "-", s.lower())
+
+
+def build_org(wb: Workbook, org: Any, own: dict[str, Any], A: str, months_by_asm: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    """Every ASM's plans, Sales Executives and pitches, for the Head of Sales's read-only MAP and Pitch pages.
+
+    Each ASM's September plan and pitches are the same build the ASM's own pages use, run for that ASM. Past months are
+    their territory × category targets (see `past_initiatives`); October is not created until the ASM saves it. The
+    viewing ASM's September rows and pitches are left out here: the web app reads them from `map` / `pitch`, which carry
+    the assignments and app updates applied per request."""
+    plans: list[dict[str, Any]] = []
+    initiatives: dict[str, list[dict[str, Any]]] = {}
+    execs: list[dict[str, Any]] = []
+    pitches: list[dict[str, Any]] = []
+    outlets: dict[str, dict[str, Any]] = {}
+    kpis: dict[str, Any] = {}
+    points: dict[str, Any] = {}
+    lines: dict[str, str] = {}
+    for a in org.asms:
+        p = own if a == A else build(wb, org, {"A": a, "sig_rows": [], "recs": [], "rec_route": {}})
+        mp, pi = p["map"], p["pitch"]
+        region = org.region_of_asm[a]
+        terrs = mp["TERRITORIES"]
+        exec_for = mp["EXEC_FOR"]
+        execs += [{"name": e["name"], "region": region, "asm": a, "territories": e["territories"]} for e in mp["SALES_EXECS"]]
+        for k, mo in enumerate(months_by_asm[a]):
+            pid = f"{_slug(region)}-{mo['month'].lower()}"
+            if mo["month"] == "Sep":
+                rows = mp["SEP_INITIATIVES"]
+            elif mo["created"]:
+                rows = past_initiatives(org, a, exec_for, k, pid)
+            else:
+                rows = []
+            plans.append({"id": pid, "region": region, "asm": a, "initials": _initials(a), "month": mo["month"],
+                          "label": f"{MONTH_LONG[mo['month']]} 2026", "territories": terrs, "created": mo["created"], "versions": 1 if mo["created"] else 0,
+                          "initiatives": len(rows), "estimateL": mo["estimateL"], "achievedL": mo["achievedL"], "status": mo["status"], "note": mo["note"]})
+            # the viewing ASM's September is the live one in `map`
+            initiatives[pid] = [] if (a == A and mo["month"] == "Sep") else rows
+        if a == A:
+            continue
+        # the September plan's pushes, as pitches: one per outlet, a second initiative on the same outlet adds a source
+        by_outlet: dict[str, dict[str, Any]] = {}
+        for i in mp["SEP_INITIATIVES"]:
+            for o in (i["pitch"] or {}).get("outlets", []):
+                if o not in pi["OUTLETS"]:
+                    continue
+                src = {"kind": "plan", "initiative": i["id"], "mode": i["pitch"]["mode"]}
+                if o in by_outlet:
+                    by_outlet[o]["sources"].append(src)
+                    continue
+                meta, st = pi["OUTLETS"][o], pi["STATE"].get(o)
+                by_outlet[o] = {"id": f"p-{_pslug(o)}", "outlet": o, "type": meta["type"], "territory": meta["territory"], "code": meta["code"],
+                                "se": st["visited"]["by"] if st else exec_for.get(meta["territory"], a), "sources": [src],
+                                "status": "visited" if st else "in-sfa", "generated": pi["GENERATED_AT"], "sfaAt": pi["GENERATED_AT"],
+                                **({"visited": st["visited"]} if st else {}), "language": pi["LANGUAGE"], "tone": "Balanced", "asm": a, "region": region}
+        pitches += by_outlet.values()
+        for o in by_outlet:
+            outlets[o] = pi["OUTLETS"][o]
+            kpis[o] = pi["KPIS"][o]
+            points[o] = pi["POINTS"][o]
+        lines.update(pi["PLAN_LINES"])
+    return {"ORG_PLANS": plans, "ORG_INITIATIVES": initiatives, "ORG_EXECS": execs, "ORG_PITCHES": pitches,
+            "ORG_OUTLETS": outlets, "ORG_KPIS": kpis, "ORG_POINTS": points, "ORG_PLAN_LINES": lines}
 
 
 # ---------------------------------------------------------------- per-request overlay of the app's own records

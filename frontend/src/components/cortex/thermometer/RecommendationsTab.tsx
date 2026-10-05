@@ -12,7 +12,7 @@ import { ACTION_TRACES, REC_SUGGESTED, ROUTE_DONE_LABEL } from "@/data/actionTra
 import { RAG_COLOR, ThermoPersona, fmtL, regionOfTerr, asmOf } from "@/data/thermometer";
 import { AiMeta, AiTag } from "../ai";
 import { AgentRunChip } from "../agentRun";
-import { SuggestedOutcome, TraceTooltip } from "../actionTrace";
+import { SuggestedOutcome, TraceTrigger } from "../actionTrace";
 import { useHome } from "../HomeState";
 import { card } from "../kit";
 import { useOutside } from "../shell";
@@ -140,7 +140,7 @@ function AsmRouting({ r }: { r: ThermoRec }) {
   const others = ROUTES.filter((x) => x.id !== r.route);
   return (
     <div className="space-y-2">
-      <SuggestedOutcome label={ROUTE_DONE_LABEL[r.route]} trace={r.trace} removed={!active.includes(r.route)} onRestore={() => toggleRoute(r.id, r.route)} />
+      <SuggestedOutcome id={`${r.id}:${r.route}`} label={ROUTE_DONE_LABEL[r.route]} trace={r.trace} source="Thermometer Recommendation" title={r.title} removed={!active.includes(r.route)} onRestore={() => toggleRoute(r.id, r.route)} />
       <div className="flex flex-wrap items-center gap-1.5">
         {active.includes(r.route) && (
           <button onClick={() => (toggleRoute(r.id, r.route), toast(`Removed: ${ROUTE_DONE_LABEL[r.route]}.`))} className="inline-flex h-7 items-center rounded-md px-1.5 text-[12px] text-cx-faint hover:bg-cx-hover hover:text-cx-text">
@@ -218,7 +218,7 @@ function HeadRouting({ r }: { r: ThermoRec }) {
             </div>
           )}
         </div>
-        <TraceTooltip trace={r.trace} heading="How Sales AI arrived at this suggestion" />
+        <TraceTrigger trace={r.trace} source="Thermometer Recommendation" title={r.title} compact />
       </div>
       {routed.length > 0 && (
         <p className="flex flex-wrap gap-1.5">

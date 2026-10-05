@@ -8,6 +8,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { apiUrl } from "@/data/source";
 import { LBL } from "@/data/labels";
 import type { Ticket } from "@/data/tracker";
+import { ESCALATIONS, VIEWER, type Escalation } from "@/data/cortexHome";
 
 const POLL_MS = 30000;
 
@@ -48,6 +49,30 @@ export interface AssignResult {
   created: boolean;
 }
 
+/** An escalation as the backend stores it (GET /api/tracker/escalations). */
+interface StoredEscalation {
+  id: string;
+  source_id: string;
+  note: string;
+  created: number;
+  status: "open" | "withdrawn";
+}
+
+export interface EscalateInput {
+  source_id: string;
+  kind: "plan" | "recommendation";
+  title: string;
+  note: string;
+  territory?: string;
+  priority?: "High" | "Medium" | "Low";
+}
+
+const stamp = (ms: number) => {
+  const d = new Date(ms);
+  return `${d.getDate()} ${d.toLocaleString("en-GB", { month: "short" })}, ${d.toTimeString().slice(0, 5)}`;
+};
+const toEsc = (e: StoredEscalation): Escalation => ({ id: e.id, note: e.note, at: stamp(e.created), to: VIEWER.head.name });
+
 interface Ctx {
   /** assigned actions by the web item they came from (sug-1, new-rec-3, …) */
   assigned: Record<string, AssignedAction>;
@@ -58,6 +83,11 @@ interface Ctx {
   comment: (id: string, text: string, t?: Ticket) => Promise<unknown>;
   /** verify and close, or send back, what an officer marked done */
   review: (t: Ticket, decision: "verify" | "send_back", note?: string) => Promise<unknown>;
+  /** the ASM's open escalations to the Head of Sales, by the item they came from */
+  escalations: Record<string, Escalation>;
+  escalate: (x: EscalateInput) => Promise<Escalation>;
+  /** take an open escalation back out of the Head of Sales's queue */
+  withdraw: (sourceId: string) => Promise<void>;
 }
 
 /** web signal kind → the officer app's signal name (same workbook rule) */
@@ -89,10 +119,17 @@ export function AssignmentsProvider({ children }: { children: React.ReactNode })
   const asm = LBL.asmName;
   const [actions, setActions] = useState<AssignedAction[]>([]);
   const [delivery, setDelivery] = useState<Record<string, Delivery | null>>({});
+  // the page-load payload first, then the backend's list, re-read with the actions
+  const [escalations, setEscalations] = useState<Record<string, Escalation>>(ESCALATIONS);
 
   // statuses change in the officer's app, so re-read them now and then
   useEffect(() => {
-    const load = () => api<AssignedAction[]>(`/api/tracker/actions?assigned_by=${encodeURIComponent(asm)}`).then(setActions).catch(() => {});
+    const load = () => {
+      api<AssignedAction[]>(`/api/tracker/actions?assigned_by=${encodeURIComponent(asm)}`).then(setActions).catch(() => {});
+      api<StoredEscalation[]>(`/api/tracker/escalations?by=${encodeURIComponent(asm)}`)
+        .then((es) => setEscalations(Object.fromEntries(es.map((e) => [e.source_id, toEsc(e)]))))
+        .catch(() => {});
+    };
     load();
     const t = setInterval(() => document.visibilityState === "visible" && load(), POLL_MS);
     return () => clearInterval(t);
@@ -121,11 +158,34 @@ export function AssignmentsProvider({ children }: { children: React.ReactNode })
     [asm],
   );
 
+  const escalate = useCallback(
+    async (x: EscalateInput) => {
+      const r = await api<{ escalation: StoredEscalation }>("/api/tracker/escalate", { method: "POST", body: JSON.stringify({ ...x, by: asm }) });
+      const e = toEsc(r.escalation);
+      setEscalations((m) => ({ ...m, [x.source_id]: e }));
+      return e;
+    },
+    [asm],
+  );
+  const withdraw = useCallback(
+    async (sourceId: string) => {
+      const e = escalations[sourceId];
+      if (!e) return;
+      await api(`/api/tracker/escalations/${encodeURIComponent(e.id)}/withdraw`, { method: "POST", body: JSON.stringify({ by: asm }) });
+      setEscalations((m) => {
+        const n = { ...m };
+        delete n[sourceId];
+        return n;
+      });
+    },
+    [asm, escalations],
+  );
+
   // newest assignment per source wins (an item can be re-assigned once the earlier one is closed)
   const assigned: Record<string, AssignedAction> = {};
   for (const a of [...actions].sort((p, q) => p.created - q.created)) assigned[a.source_id] = a;
 
-  return <AssignCtx.Provider value={{ assigned, delivery, assign, comment, review }}>{children}</AssignCtx.Provider>;
+  return <AssignCtx.Provider value={{ assigned, delivery, assign, comment, review, escalations, escalate, withdraw }}>{children}</AssignCtx.Provider>;
 }
 
 /** What became of an assignment, in one line: "Pushed to Paresh Patel's phone", "In progress · …". */

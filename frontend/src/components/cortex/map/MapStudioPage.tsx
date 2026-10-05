@@ -13,16 +13,16 @@ import { ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight, Flag, Info, Li
 import { AGENTS, AgentId } from "@/data/cortexHome";
 import { BAND_COLOR, CATEGORIES, CONSIDER, OCT_DRAFT, OCT_PLAN, Priority, SALES_EXECS, TERRITORIES, REGION_SHARE, TERRITORY_SHARE, Territory, draftTrace, studioAnswer, MAP_LABELS, WEAKEST_TERRITORY, STUDIO_SOURCES } from "@/data/map";
 import { AgentRunChip } from "../agentRun";
-import { TraceTooltip } from "../actionTrace";
+import { TraceTrigger } from "../actionTrace";
 import { AiTag } from "../ai";
 import { AsmAgentPage, PriorityPill, btnPrimary } from "../agentPage";
 import { useHome } from "../HomeState";
-import { card, Dropdown } from "../kit";
+import { NoDataCard, card, Dropdown } from "../kit";
 import { useCortexNav } from "../nav";
 import { AgentIcon } from "../primitives";
 import { MarketSheet, SheetButtons, SheetId } from "./MarketSheet";
 import { OctRow, PRIORITIES, freshRows, readOct, takeAutogen, writeOct } from "./octPlan";
-import { openOctoberPlan } from "./MapPlansPage";
+import { openOctoberPlan } from "./openPlan";
 import { useAssignments } from "../assignments";
 
 type Msg = { id: number; from: "you" | "ai"; text: string };
@@ -54,6 +54,8 @@ function Studio() {
   const go = useCortexNav();
   const [scope, setScope] = useState<Territory | null>(null);
   const [product, setProduct] = useState<string | null>(null);
+  // the owning Sales Executive, matching the filter the saved plans already carry
+  const [exec, setExec] = useState<string | null>(null);
   const [canvas, setCanvas] = useState<Canvas>("empty");
   const [genStep, setGenStep] = useState(0);
   const [rows, setRows] = useState<OctRow[]>(freshRows);
@@ -69,7 +71,7 @@ function Studio() {
   const where = scope ?? MAP_LABELS.region;
   const share = scope ? TERRITORY_SHARE[scope] : REGION_SHARE;
   const consider = CONSIDER.filter((c) => !scope || c.territory === scope);
-  const shown = rows.filter((d) => (!scope || d.territory === scope) && (!product || d.product === product || d.product === "All categories"));
+  const shown = rows.filter((d) => (!scope || d.territory === scope) && (!product || d.product === product || d.product === "All categories") && (!exec || d.owner === exec));
   const add = (m: Omit<Msg, "id">) => setMsgs((xs) => [...xs, { ...m, id: nextId.current++ }]);
 
   const generate = () => {
@@ -236,9 +238,10 @@ function Studio() {
 
         {/* canvas */}
         <section aria-label="Plan canvas" className={`${card} flex min-h-[640px] min-w-0 flex-col overflow-hidden lg:min-h-0`}>
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-cx-line px-3 py-2.5">
-            <Dropdown label="Scope" value={scope} options={[...TERRITORIES]} onChange={(v) => setScope(v as Territory | null)} placeholder={`All ${TERRITORIES.length} territories`} />
-            <Dropdown label="Product" value={product} options={[...CATEGORIES]} onChange={setProduct} placeholder="All products" />
+          <div className="flex flex-wrap items-center gap-1 border-b border-cx-line px-3 py-2.5">
+            <Dropdown label="Scope" value={scope} options={[...TERRITORIES]} onChange={(v) => setScope(v as Territory | null)} placeholder={`All ${TERRITORIES.length}`} />
+            <Dropdown label="Product" value={product} options={[...CATEGORIES]} onChange={setProduct} placeholder="All" />
+            <Dropdown label="Sales Executive" value={exec} options={SALES_EXECS.map((e) => e.name)} onChange={setExec} placeholder={`All ${SALES_EXECS.length}`} />
             <span className="inline-flex h-8 items-center rounded-lg border border-cx-line px-2.5 font-data text-[12px] text-cx-muted">{OCT_PLAN.label}</span>
             <span className="mx-1 hidden h-5 w-px bg-cx-line sm:block" aria-hidden />
             <SheetButtons onOpen={setSheet} />
@@ -432,7 +435,16 @@ function DraftCanvas({
             {rows.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-5 py-8 text-center text-[12.5px] text-cx-faint">
-                  No draft initiative matches this scope and product. Clear a filter to see the rest of the plan.
+                  {OCT_DRAFT.length === 0 ? (
+                    <NoDataCard
+                      bare
+                      title="Nothing to draft"
+                      detail="The backend sent no October draft initiatives: September leaves nothing open and no territory has unvisited retailers."
+                      source="GET /api/web/sections/map · OCT_DRAFT"
+                    />
+                  ) : (
+                    "No draft initiative matches these filters. Clear one to see the rest of the plan."
+                  )}
                 </td>
               </tr>
             )}
@@ -454,7 +466,7 @@ function DraftCanvas({
                       <span className="inline-flex items-center gap-1.5">
                         <AgentIcon agent={r.from.agent} size="sm" round /> {AGENTS[r.from.agent].name} · {r.from.label}
                       </span>
-                      <TraceTooltip trace={draftTrace(r)} />
+                      <TraceTrigger trace={draftTrace(r)} source="Market Action Plan Initiative" title={r.title} compact />
                     </p>
                   </td>
                   <td className="px-3 py-3 text-right font-data text-[12.5px] text-cx-muted">₹{r.estL.toFixed(1)} L</td>

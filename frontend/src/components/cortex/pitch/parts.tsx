@@ -3,15 +3,20 @@
 // Pitch building blocks: the talking-points table in the confirmed format
 // (# · Topic · Talking point · Logic · Confidence · Status from SFA · Comment),
 // and the multi-select the Territory filter needs (an SE can cover more than one).
+//
+// Commenting is the one action both personas share. The ASM's comment is a ticket for the
+// Sales Executive; the Head of Sales's is a delegation ticket the ASM owns.
 
 import React, { useState } from "react";
 import { Check, ChevronDown, MessageSquare, Send } from "lucide-react";
 import { Confidence, confFromSources, sheetSrc } from "@/data/cortexHome";
 import { Pitch, TalkingPoint, coveredTrace } from "@/data/pitch";
 import { AgentRunChip } from "../agentRun";
-import { TraceTooltip } from "../actionTrace";
+import { TraceTrigger } from "../actionTrace";
 import { ConfidenceScore, confidenceBand } from "../ai";
-import { DotStatus } from "../agentPage";
+import { DotStatus, useReadOnly } from "../agentPage";
+import { CommentBox } from "../leadership/common";
+import { MAP_LABELS } from "@/data/map";
 import { useHome } from "../HomeState";
 import { useOutside } from "../shell";
 
@@ -69,7 +74,8 @@ function confidenceOf(t: TalkingPoint, p: Pitch): Confidence {
   return { ...c, score: s, factors: { ...c.factors, reliability: s / 100 } };
 }
 
-export function PointsTable({ p, points, commentable = true }: { p: Pitch; points: TalkingPoint[]; commentable?: boolean }) {
+export function PointsTable({ p, points, commentable = true, asm = MAP_LABELS.asm }: { p: Pitch; points: TalkingPoint[]; commentable?: boolean; asm?: string }) {
+  const head = useReadOnly();
   const th = "px-3 py-2.5 text-left text-[11px] font-normal text-cx-faint";
   const [commenting, setCommenting] = useState<number | null>(null);
   return (
@@ -122,6 +128,7 @@ export function PointsTable({ p, points, commentable = true }: { p: Pitch; point
                   <button
                     onClick={() => setCommenting((c) => (c === t.n ? null : t.n))}
                     aria-expanded={commenting === t.n}
+                    title={head ? `Comment for ${asm}. It becomes a delegation ticket they own.` : `Comment on this point for ${p.se}`}
                     className="inline-flex h-7 items-center gap-1.5 rounded-md border border-cx-line px-2.5 text-[12px] text-cx-muted hover:border-cx-strong hover:text-cx-text"
                   >
                     <MessageSquare className="h-3.5 w-3.5" /> Comment
@@ -133,7 +140,7 @@ export function PointsTable({ p, points, commentable = true }: { p: Pitch; point
               <tr>
                 <td />
                 <td colSpan={6} className="pb-4 pr-5">
-                  <PointComment se={p.se} topic={t.topic} />
+                  {head ? <CommentBox asm={asm} subject={`${p.outlet} · ${t.topic}`} /> : <PointComment se={p.se} topic={t.topic} />}
                 </td>
               </tr>
             )}
@@ -163,7 +170,7 @@ function SfaStatus({ p, t }: { p: Pitch; t: TalkingPoint }) {
         <p className="text-[11.5px] leading-snug text-cx-faint">
           {t.covered.by} · {t.covered.when} · via SFA
         </p>
-        <TraceTooltip trace={coveredTrace(p, t)} label="Evidence" />
+        <TraceTrigger trace={coveredTrace(p, t)} source="Pitch Talking Point" title={t.point} label="Evidence" />
       </div>
     );
   if (p.status === "queued") return <span className="text-[12px] text-cx-faint">Not generated</span>;
@@ -212,11 +219,36 @@ function PointComment({ se, topic }: { se: string; topic: string }) {
 }
 
 const OPEN_KEY = "cx-pitch-open";
-export function setOpenPitch(id: string) {
+const ORIGIN_KEY = "cx-pitch-origin";
+
+/** Where a pitch was opened from, when it was reached through a plan initiative. The pitch
+ *  detail turns this into its breadcrumb, so the visit says which plan row sent it. */
+export interface PitchOrigin {
+  /** the plan this initiative belongs to, as its own header reads it */
+  plan: string;
+  /** the org plan id, so the Head of Sales lands back on that ASM's plan and not the index */
+  planId?: string;
+  n: number;
+  initiative: string;
+}
+
+/** Opening a pitch from anywhere but a plan row clears the origin, so a stale trail never shows. */
+export function setOpenPitch(id: string, origin?: PitchOrigin) {
   try {
     sessionStorage.setItem(OPEN_KEY, id);
+    if (origin) sessionStorage.setItem(ORIGIN_KEY, JSON.stringify(origin));
+    else sessionStorage.removeItem(ORIGIN_KEY);
   } catch {
     /* storage unavailable */
+  }
+}
+
+export function getPitchOrigin(): PitchOrigin | null {
+  try {
+    const raw = sessionStorage.getItem(ORIGIN_KEY);
+    return raw ? (JSON.parse(raw) as PitchOrigin) : null;
+  } catch {
+    return null;
   }
 }
 export function getOpenPitch(): string | null {

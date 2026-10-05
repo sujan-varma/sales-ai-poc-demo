@@ -4,8 +4,12 @@
 // September plan: summary row, "New since this plan", filters, and expandable initiative
 // rows (action steps, visit feedback from SFA, attachments, comments that create a ticket
 // for the owner). Each row's Actions menu pushes the initiative to Pitch (review §3.1).
+//
+// The Head of Sales (/leadership/map) reads every ASM's plans. Nothing is created, edited,
+// pushed or taken back there; their one action is a comment on an initiative, which becomes
+// a delegation ticket the ASM owns — the same rule as the Leadership page.
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, ChevronDown, ChevronRight, History, Sparkles, MessageSquare, MoreHorizontal, Paperclip, Pencil, Plus, Send, X } from "lucide-react";
 import { AGENTS, AgentRun } from "@/data/cortexHome";
 import {
@@ -16,8 +20,9 @@ import {
   MAP_LABELS,
   PLAN_INDEX,
   Priority,
-  TERRITORIES,
   REGION_SHARE,
+  SALES_EXECS,
+  TERRITORIES,
   SEP_INITIATIVES,
   SEP_PLAN,
   SINCE_LOCKED,
@@ -27,57 +32,65 @@ import {
   pushTrace,
 } from "@/data/map";
 import { EMPTY_SESSION, SUGGESTED_OUTLETS, readSession, writeSession, PitchSession } from "@/data/pitch";
+import { PitchOrigin, setOpenPitch } from "../pitch/parts";
 import { AgentRunChip } from "../agentRun";
-import { TraceTooltip } from "../actionTrace";
-import { AgentPageHeader, AsmAgentPage, DotStatus, PriorityPill, btnPrimary } from "../agentPage";
+import { TraceTrigger } from "../actionTrace";
+import { AgentPageHeader, AgentPersona, AsmAgentPage, DotStatus, PriorityPill, btnPrimary, useReadOnly } from "../agentPage";
+import { CommentBox } from "../leadership/common";
 import { useHome } from "../HomeState";
-import { card, Dropdown } from "../kit";
+import { NoDataCard, card, Dropdown } from "../kit";
 import { useCortexNav } from "../nav";
 import { AgentIcon } from "../primitives";
 import { useOutside } from "../shell";
 import { MarketSheet, SheetButtons, SheetId } from "./MarketSheet";
+import { OrgPlanIndex } from "./OrgPlanIndex";
+import { SummaryRow } from "./SummaryRow";
+import { ORG_PLANS, OWN_REGION, OrgPlan, execsOf, flagsOf, orgInitiatives } from "@/data/org";
+import { LBL } from "@/data/labels";
+import { assignToast, useAssignments } from "../assignments";
 import { initiativeOverrides, livePlanMonths, openTicket, useLoop } from "../tracker/loop";
+import { takeAsmPlan, takeOrgPlan } from "./openPlan";
 import { OctRow, freshRows, readOct, requestAutogen, useOctPlan, writeOct } from "./octPlan";
 import { PeriodFilter, periodDetail, periodMonths, usePeriod } from "../period";
 import { PlanTimeline } from "../sections";
 import { OUTLETS } from "@/data/pitch";
-import { LBL } from "@/data/labels";
 import { octTicketId } from "@/data/tracker";
-import { assignToast, useAssignments } from "../assignments";
 
-const OPEN_KEY = "cx-map-open";
+/** The one ASM on their own view; the Head of Sales picks from every ASM. */
+const ASM_NAME = `${MAP_LABELS.asm} · ${OWN_REGION}`;
 
-/** Open the plans page on a plan rather than the index. */
-function openPlanView(id: "sep" | "oct") {
-  try {
-    sessionStorage.setItem(OPEN_KEY, id);
-  } catch {
-    /* storage unavailable */
-  }
-}
-export const openSeptemberPlan = () => openPlanView("sep");
-/** Saving in MAP Studio lands here, on the October plan's own page. */
-export const openOctoberPlan = () => openPlanView("oct");
-
-export function MapPlansPage() {
+export function MapPlansPage({ persona = "asm" }: { persona?: AgentPersona }) {
   return (
-    <AsmAgentPage agent="map" topBarExtra={<PeriodFilter />}>
+    <AsmAgentPage agent="map" persona={persona} topBarExtra={<PeriodFilter />}>
       <Plans />
     </AsmAgentPage>
   );
 }
 
 function Plans() {
-  const [view, setView] = useState<"index" | "sep" | "oct">("index");
+  return useReadOnly() ? <OrgPlans /> : <AsmPlans />;
+}
+
+/** The Head of Sales: every ASM's plans, then the same detail the ASM reads. */
+function OrgPlans() {
+  const [open, setOpen] = useState<OrgPlan | null>(null);
+  // coming back from a pitch opened on one of these rows reopens that plan, not the index
   useEffect(() => {
-    try {
-      // deep link (?plan=sep|oct), a homepage "Open plan", or a Save in MAP Studio
-      const want = sessionStorage.getItem(OPEN_KEY) ?? new URLSearchParams(location.search).get("plan");
-      if (want === "sep" || want === "oct") setView(want);
-      sessionStorage.removeItem(OPEN_KEY);
-    } catch {
-      /* storage unavailable */
-    }
+    const id = takeOrgPlan();
+    if (id) setOpen(ORG_PLANS.find((p) => p.id === id) ?? null);
+  }, []);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [open]);
+  return open ? <PlanDetail key={open.id} planId="sep" org={open} onBack={() => setOpen(null)} /> : <OrgPlanIndex onOpen={setOpen} />;
+}
+
+function AsmPlans() {
+  const [view, setView] = useState<"index" | "sep" | "oct">("index");
+  // deep link (?plan=sep|oct), a homepage "Open plan", or a Save in MAP Studio
+  useEffect(() => {
+    const want = takeAsmPlan();
+    if (want) setView(want);
   }, []);
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -92,6 +105,11 @@ function Plans() {
 function PlanIndex({ onOpen }: { onOpen: (id: "sep" | "oct") => void }) {
   const go = useCortexNav();
   const { toast } = useHome();
+  const head = useReadOnly();
+  // The ASM owns one region, so their ASM filter holds one name; picking it reveals their team,
+  // the same two-level move the Head of Sales makes across every ASM.
+  const [asm, setAsm] = useState<string | null>(null);
+  const [exec, setExec] = useState<string | null>(null);
   const live = livePlanMonths(useLoop());
   const oct = useOctPlan();
   const [period] = usePeriod();
@@ -104,20 +122,64 @@ function PlanIndex({ onOpen }: { onOpen: (id: "sep" | "oct") => void }) {
   const rows = all.filter((m) => inPeriod.has(m.month) || m.month === "Oct").reverse();
   const counted = all.filter((m) => inPeriod.has(m.month) && m.created).length;
   const timeline = all.map((m) => ({ ...m, achievedL: m.month === "Oct" ? null : m.achievedL }));
+  // a Sales Executive's months are the ones whose plan carries an initiative they own
+  const execMonths = exec ? new Set(ORG_PLANS.filter((p) => p.region === OWN_REGION && orgInitiatives(p.id).some((i) => i.owner === exec)).map((p) => p.month)) : null;
+  const shown = execMonths ? rows.filter((m) => execMonths.has(m.month)) : rows;
   const th = "px-3 py-2.5 text-left text-[11px] font-normal text-cx-faint";
   return (
     <div className="pb-24">
       <AgentPageHeader
         agent="map"
         title="Market Action Plans"
-        meta={<>Every plan by month, with its version history · {MAP_LABELS.region} · one plan across all {TERRITORIES.length} territories</>}
+        meta={
+          head ? (
+            <>
+              {MAP_LABELS.asm} · {MAP_LABELS.region} · every plan by month, with its version history · read-only
+            </>
+          ) : (
+            <>
+              Every plan by month, with its version history · {MAP_LABELS.region} · one plan across all {TERRITORIES.length} territories
+            </>
+          )
+        }
         right={
-          <button onClick={() => go("map-studio")} className={btnPrimary}>
-            <Sparkles className="h-4 w-4" /> MAP Studio
-          </button>
+          head ? undefined : (
+            <button onClick={() => go("map-studio")} className={btnPrimary}>
+              <Sparkles className="h-4 w-4" /> MAP Studio
+            </button>
+          )
         }
       />
       <div className="space-y-5 px-4 sm:px-6">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Dropdown
+            label="ASM"
+            value={asm}
+            options={[ASM_NAME]}
+            onChange={(v) => {
+              setAsm(v);
+              setExec(null);
+            }}
+            placeholder="You"
+          />
+          {asm && <Dropdown label="Sales Executive" value={exec} options={SALES_EXECS.map((e) => e.name)} onChange={setExec} placeholder={`All ${SALES_EXECS.length}`} />}
+          {exec && (
+            <span className="text-[12px] text-cx-faint">
+              Months carrying one of {exec}'s initiatives · <span className="font-data text-cx-muted">{shown.filter((m) => m.created).length}</span>
+            </span>
+          )}
+          {(asm || exec) && (
+            <button
+              onClick={() => {
+                setAsm(null);
+                setExec(null);
+              }}
+              className="text-[12px] text-cx-muted hover:text-cx-text"
+            >
+              Clear
+            </button>
+          )}
+        </div>
         <section aria-label="Plans by month" className={`${card} px-5 pb-4 pt-5`}>
           <p className="mb-3 text-[12.5px] text-cx-muted">
             <span className="font-data text-cx-text">{counted}</span> plan{counted === 1 ? "" : "s"} in {periodDetail(period)}
@@ -150,10 +212,30 @@ function PlanIndex({ onOpen }: { onOpen: (id: "sep" | "oct") => void }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-cx-line">
-              {rows.map((m) => {
+              {shown.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-5 py-8 text-center text-[12.5px] text-cx-faint">
+                    {all.length === 0 ? (
+                      <NoDataCard bare title="No plans from the backend" detail="The backend sent no plan months for this ASM yet." source="GET /api/web/sections/cortexHome · PLAN_MONTHS" />
+                    ) : (
+                      "No month in this period carries one of this Sales Executive's initiatives."
+                    )}
+                  </td>
+                </tr>
+              )}
+              {shown.map((m) => {
                 const pct = m.estimateL && m.achievedL != null ? Math.round((m.achievedL / m.estimateL) * 100) : null;
                 const status = !m.created ? { label: "Draft · not generated", color: "#7c7f89" } : m.month === "Oct" ? { label: "Saved · starts 1 Oct", color: "#4f86f7" } : m.status === "progress" ? { label: "Locked · live", color: "#4f86f7" } : { label: "Closed", color: "#2fa85c" };
-                const open = () => (m.month === "Oct" ? (oct?.saved ? onOpen("oct") : (requestAutogen(), go("map-studio"))) : m.month === "Sep" ? onOpen("sep") : toast(`Opens the ${m.label} plan, read-only.`));
+                const open = () =>
+                  m.month === "Oct"
+                    ? oct?.saved
+                      ? onOpen("oct")
+                      : head
+                        ? toast(`${MAP_LABELS.asm} hasn't created the October plan yet. It appears here once it's saved.`)
+                        : (requestAutogen(), go("map-studio"))
+                    : m.month === "Sep"
+                      ? onOpen("sep")
+                      : toast(`Opens the ${m.label} plan, read-only.`);
                 return (
                   <tr key={m.month} className="cursor-pointer hover:bg-cx-hover/40" onClick={open}>
                     <td className="py-3 pl-5 pr-3">
@@ -176,7 +258,7 @@ function PlanIndex({ onOpen }: { onOpen: (id: "sep" | "oct") => void }) {
                         }}
                         className="inline-flex items-center gap-1 whitespace-nowrap text-[12px] text-[#4f86f7] hover:underline"
                       >
-                        {m.month === "Oct" && !oct?.saved ? "Create October MAP" : "Open"} <ArrowRight className="h-3 w-3" />
+                        {m.month === "Oct" && !oct?.saved ? (head ? "Not created yet" : "Create October MAP") : "Open"} <ArrowRight className="h-3 w-3" />
                       </button>
                     </td>
                   </tr>
@@ -195,7 +277,8 @@ function PlanIndex({ onOpen }: { onOpen: (id: "sep" | "oct") => void }) {
 // ---------------------------------------------------------------------------
 
 const FILTERS = [
-  { key: "territory", label: "Territory", options: [...TERRITORIES] },
+  { key: "territory", label: "Territory", options: [] as readonly string[] },
+  { key: "owner", label: "Sales Executive", options: [] as readonly string[] },
   { key: "channel", label: "Channel", options: ["Distributor", "Dealer", "Retailer", "Influencer"] },
   { key: "product", label: "Product", options: ["All categories", ...CATEGORIES] },
   { key: "sector", label: "Business sector", options: ["Trade", "Non-Trade"] },
@@ -205,6 +288,7 @@ const FILTERS = [
   { key: "pushed", label: "Pushed to", options: ["Tracker", "Pitch", "Not pushed"] },
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
+const NO_FILTERS: Record<FilterKey, string | null> = { territory: null, owner: null, channel: null, product: null, sector: null, lever: null, priority: null, status: null, pushed: null };
 
 /** The saved October plan as plan rows: every initiative has a Tracker ticket for its owner; High ones went to Pitch. */
 function octInitiatives(rows: OctRow[]): Initiative[] {
@@ -226,7 +310,7 @@ function octInitiatives(rows: OctRow[]): Initiative[] {
     agreed: d.targetL,
     delivered: null,
     description: d.why,
-    steps: [`Delegated to ${d.owner} as ${octTicketId(k)} in the Action Tracker`, d.priority === "High" ? "Talking point added to the pitches on his beats, in SFA" : "Suggested in Pitch; push it when you're ready", "Delivered counts from 1 Oct"],
+    steps: [`Delegated to ${d.owner} as ${octTicketId(k)} in the Action Tracker`, d.priority === "High" ? `Talking point added to the pitches on ${d.owner}'s beats, in SFA` : "Suggested in Pitch; push it when you're ready", "Delivered counts from 1 Oct"],
     source: { agent: d.from.agent, ref: d.from.label, at: "Generated today" },
     pitch: d.priority === "High" ? { mode: "auto", outlets: Object.keys(OUTLETS).filter((o) => OUTLETS[o].territory === d.territory).slice(0, 2), at: "Today, 18:20" } : null,
     attachments: 0,
@@ -234,34 +318,51 @@ function octInitiatives(rows: OctRow[]): Initiative[] {
   }));
 }
 
-function PlanDetail({ planId, onBack }: { planId: "sep" | "oct"; onBack: () => void }) {
+function PlanDetail({ planId, org, onBack }: { planId: "sep" | "oct"; org?: OrgPlan; onBack: () => void }) {
   const { toast } = useHome();
   const go = useCortexNav();
+  const head = useReadOnly();
   const octSaved = useOctPlan();
   const [period] = usePeriod();
-  const isOct = planId === "oct";
-  const meta = isOct
-    ? { label: "October 2026", version: "v1 of 1", pill: "Saved", pillTitle: `Saved ${octSaved?.savedAt ?? ""}`, history: `v1 saved ${octSaved?.savedAt ?? "today"} in MAP Studio.` }
-    : { label: SEP_PLAN.label, version: SEP_PLAN.version, pill: "Locked", pillTitle: SEP_PLAN.locked, history: SEP_PLAN.history };
+  const isOct = !org && planId === "oct";
+  // the ASM's own September plan is the live one (tickets applied), whichever page opened it
+  const ownSep = !org || (org.region === OWN_REGION && org.month === "Sep");
+  const meta = org
+    ? {
+        label: org.label,
+        version: `v${org.versions} of ${org.versions}`,
+        pill: org.status === "progress" ? "Locked" : org.month === "Oct" ? "Saved" : "Closed",
+        pillTitle: org.note,
+        history: ownSep ? SEP_PLAN.history : org.created ? `v${org.versions} · ${org.asm} · ${org.note}. The workbook keeps no plan versions.` : org.note,
+      }
+    : isOct
+      ? { label: "October 2026", version: "v1 of 1", pill: "Saved", pillTitle: `Saved ${octSaved?.savedAt ?? ""}`, history: `v1 saved ${octSaved?.savedAt ?? "today"} in MAP Studio.` }
+      : { label: SEP_PLAN.label, version: SEP_PLAN.version, pill: "Locked", pillTitle: SEP_PLAN.locked, history: SEP_PLAN.history };
+  const scope = org
+    ? { owner: org.asm, place: org.region, territories: org.territories as readonly string[], execs: execsOf(org.region).map((e) => e.name) }
+    : { owner: MAP_LABELS.asm, place: OWN_REGION, territories: TERRITORIES as readonly string[], execs: SALES_EXECS.map((e) => e.name) };
   // upcoming October isn't counted in any past period, so only a past plan gets the note
-  const outside = !isOct && !periodMonths(period).some((m) => m.month === "Sep");
+  const outside = !isOct && !org && !periodMonths(period).some((m) => m.month === "Sep");
   const [session, setSession] = useState<PitchSession>(EMPTY_SESSION);
   useEffect(() => setSession(readSession()), []);
   const [removed, setRemoved] = useState<string[]>([]);
   // tickets verified in the Action Tracker carry their outcome into the plan (use-case step 11)
   const overrides = initiativeOverrides(useLoop());
+  // actions assigned from the plan live in the backend, so they survive a reload and show on every device
   const { assigned } = useAssignments();
   const withTicket = (i: Initiative): Initiative => {
     const a = assigned[i.id];
     return a && !i.ticket ? { ...i, ticket: a.id, status: a.st === "closed" ? "ticket-closed" : i.status === "closed" ? "closed" : "escalated" } : i;
   };
-  const PLAN: Initiative[] = isOct
-    ? octInitiatives(octSaved?.rows ?? freshRows()).map((i) => (assigned[i.id] ? { ...i, ticket: assigned[i.id].id } : i))
-    : SEP_INITIATIVES.map((i) => (overrides[i.id] ? { ...i, delivered: overrides[i.id].delivered ?? i.delivered, status: "closed", ticket: overrides[i.id].ticket } : withTicket(i)));
+  const base: Initiative[] = org ? orgInitiatives(org.id) : isOct ? octInitiatives(octSaved?.rows ?? freshRows()).map((i) => (assigned[i.id] ? { ...i, ticket: assigned[i.id].id } : i)) : SEP_INITIATIVES;
+  // tickets verified in the Action Tracker carry their outcome into the ASM's own September plan
+  const PLAN: Initiative[] =
+    ownSep && !isOct ? base.map((i) => (overrides[i.id] ? { ...i, delivered: overrides[i.id].delivered ?? i.delivered, status: "closed" as const, ticket: overrides[i.id].ticket } : withTicket(i))) : base;
   const [open, setOpen] = useState<string | null>(null);
-  const [banner, setBanner] = useState(!isOct);
+  // "New since this plan" is built against the ASM's own September; other plans have no feed
+  const [banner, setBanner] = useState(ownSep && !isOct);
   const [sheet, setSheet] = useState<SheetId | null>(null);
-  const [f, setF] = useState<Record<FilterKey, string | null>>({ territory: null, channel: null, product: null, sector: null, lever: null, priority: null, status: null, pushed: null });
+  const [f, setF] = useState<Record<FilterKey, string | null>>(NO_FILTERS);
 
   const pitchOf = (i: Initiative) => {
     if (removed.includes(i.id)) return null;
@@ -269,10 +370,14 @@ function PlanDetail({ planId, onBack }: { planId: "sep" | "oct"; onBack: () => v
     if (session.pushed.includes(i.id)) return { mode: "confirmed" as const, outlets: SUGGESTED_OUTLETS[i.id] ?? [], at: "Today" };
     return null;
   };
-  const pushedTo = (i: Initiative) => [i.ticket && i.status !== "closed" ? "Tracker" : null, pitchOf(i) ? "Pitch" : null].filter(Boolean) as string[];
+  const pushedTo = (i: Initiative) => {
+    const f = flagsOf({ ...i, pitch: pitchOf(i) });
+    return [f.tracker ? "Tracker" : null, f.pitch ? "Pitch" : null].filter(Boolean) as string[];
+  };
 
   const rows = PLAN.filter((i) => {
     if (f.territory && i.territory !== f.territory) return false;
+    if (f.owner && i.owner !== f.owner) return false;
     if (f.channel && i.channel !== f.channel) return false;
     if (f.product && i.product !== f.product) return false;
     if (f.sector && i.sector !== f.sector) return false;
@@ -312,7 +417,7 @@ function PlanDetail({ planId, onBack }: { planId: "sep" | "oct"; onBack: () => v
   };
 
   const jump = (id: string) => {
-    setF({ territory: null, channel: null, product: null, sector: null, lever: null, priority: null, status: null, pushed: null });
+    setF(NO_FILTERS);
     setOpen(id);
     setTimeout(() => document.getElementById(`row-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
   };
@@ -331,7 +436,8 @@ function PlanDetail({ planId, onBack }: { planId: "sep" | "oct"; onBack: () => v
               /
             </span>
             <span className="text-cx-text" aria-current="page">
-              {MAP_LABELS.region} · {meta.label}
+              {head ? `${scope.owner} · ` : ""}
+              {scope.place} · {meta.label}
             </span>
           </nav>
         </div>
@@ -349,70 +455,95 @@ function PlanDetail({ planId, onBack }: { planId: "sep" | "oct"; onBack: () => v
         {/* plan header */}
         <div className={`${card} flex flex-wrap items-center gap-3 px-5 py-4`}>
           <h1 className="flex items-center gap-2.5 text-[20px] font-medium text-cx-text">
-            <AgentIcon agent="map" /> {MAP_LABELS.region} · {meta.label}
+            <AgentIcon agent="map" /> {head ? `${scope.owner} · ` : ""}
+            {scope.place} · {meta.label}
           </h1>
           <span className="inline-flex h-6 items-center rounded-full border border-[#2fa85c]/40 bg-[#2fa85c]/10 px-2 text-[11.5px] text-cx-text" title={meta.pillTitle}>
             {meta.pill}
           </span>
-          <span className="inline-flex h-6 items-center rounded-full border px-2 text-[11.5px] text-cx-text" style={{ borderColor: `${BAND_COLOR[REGION_SHARE.band]}66`, background: `${BAND_COLOR[REGION_SHARE.band]}1a` }}>
-            {REGION_SHARE.band} · <span className="ml-1 font-data">{REGION_SHARE.share}%</span>&nbsp;share
-          </span>
+          {scope.place === OWN_REGION && (
+            <span className="inline-flex h-6 items-center rounded-full border px-2 text-[11.5px] text-cx-text" style={{ borderColor: `${BAND_COLOR[REGION_SHARE.band]}66`, background: `${BAND_COLOR[REGION_SHARE.band]}1a` }}>
+              {REGION_SHARE.band} · <span className="ml-1 font-data">{REGION_SHARE.share}%</span>&nbsp;share
+            </span>
+          )}
           <span className="mx-1 hidden h-5 w-px bg-cx-line md:block" aria-hidden />
-          <div className="flex flex-wrap gap-1.5">
-            <SheetButtons onOpen={setSheet} />
-          </div>
+          {scope.place === OWN_REGION && (
+            <div className="flex flex-wrap gap-1.5">
+              <SheetButtons onOpen={setSheet} />
+            </div>
+          )}
           <span className="ml-auto flex flex-wrap items-center gap-1.5">
             <button onClick={() => toast(meta.history)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-cx-line px-2.5 text-[12.5px] text-cx-muted hover:border-cx-strong hover:text-cx-text">
               <History className="h-3.5 w-3.5" /> <span className="font-data">{meta.version}</span>
             </button>
-            <button onClick={() => jump((PLAN.find((x) => x.comments.length) ?? PLAN[0])?.id ?? "")} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-cx-line px-2.5 text-[12.5px] text-cx-muted hover:border-cx-strong hover:text-cx-text">
-              <MessageSquare className="h-3.5 w-3.5" /> Comments
-            </button>
-            <button
-              onClick={() => {
-                if (isOct) {
-                  // the explicit way back in: reopen the saved plan for editing
-                  const cur = readOct();
-                  if (cur) writeOct({ ...cur, editing: true });
-                } else toast("September is locked. Changes go into October's draft in MAP Studio.");
-                go("map-studio");
-              }}
-              className={btnPrimary}
-            >
-              <Pencil className="h-3.5 w-3.5" /> Edit in MAP Studio
-            </button>
+            {PLAN.some((x) => x.comments.length) && (
+              <button onClick={() => jump(PLAN.find((x) => x.comments.length)!.id)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-cx-line px-2.5 text-[12.5px] text-cx-muted hover:border-cx-strong hover:text-cx-text">
+                <MessageSquare className="h-3.5 w-3.5" /> Comments
+              </button>
+            )}
+            {head ? (
+              <span className="inline-flex h-8 items-center rounded-md border border-cx-line bg-cx-raised px-2.5 text-[12.5px] text-cx-muted" title={`${scope.owner} owns this plan. Comment on an initiative to raise a ticket they own.`}>
+                Read-only · {scope.owner} owns this plan
+              </span>
+            ) : (
+              <button
+                onClick={() => {
+                  if (isOct) {
+                    // the explicit way back in: reopen the saved plan for editing
+                    const cur = readOct();
+                    if (cur) writeOct({ ...cur, editing: true });
+                  } else toast("September is locked. Changes go into October's draft in MAP Studio.");
+                  go("map-studio");
+                }}
+                className={btnPrimary}
+              >
+                <Pencil className="h-3.5 w-3.5" /> Edit in MAP Studio
+              </button>
+            )}
           </span>
         </div>
 
-        {/* summary row */}
-        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-cx-line bg-cx-line md:grid-cols-5">
-          {[
-            ["Estimated impact", `₹${sum.est.toFixed(1)} L`, null],
-            [isOct ? "Your target" : "Agreed impact", `₹${sum.agreed.toFixed(1)} L`, isOct ? "Set in MAP Studio" : null],
-            isOct ? ["Delivered", "Starts 1 Oct", "Counts from the first October bill"] : ["Delivered", `₹${sum.delivered.toFixed(1)} L · ${sum.pct}%`, `of agreed, ${LBL.daysLeft}`],
-            ["Closed", `${sum.closed} of ${sum.total}`, null],
-            ["Flagged", String(flagged), `${flaggedPitch} in Pitch · ${flaggedBoth} of them also in Tracker${flagged > flaggedPitch ? ` · ${flagged - flaggedPitch} in Tracker only` : ""}`],
-          ].map(([k, v, s]) => (
-            <div key={k} className="bg-cx-panel px-5 py-4">
-              <p className="text-[12px] text-cx-faint">{k}</p>
-              <p className="mt-1 font-data text-[20px] text-cx-text">{v}</p>
-              {s && <p className="mt-0.5 text-[11.5px] text-cx-faint">{s}</p>}
-            </div>
-          ))}
-        </div>
+        {/* summary row — the same stripe the Head of Sales reads org-wide on the index */}
+        <SummaryRow
+          label={`${meta.label} summary`}
+          cells={[
+            { label: "Estimated impact", value: `₹${sum.est.toFixed(1)} L` },
+            { label: isOct ? "Your target" : "Agreed impact", value: `₹${sum.agreed.toFixed(1)} L`, sub: isOct ? "Set in MAP Studio" : org ? `Agreed by ${scope.owner}` : undefined },
+            isOct
+              ? { label: "Delivered", value: "Starts 1 Oct", sub: "Counts from the first October bill" }
+              : {
+                  label: "Delivered",
+                  value: `₹${sum.delivered.toFixed(1)} L · ${sum.pct}%`,
+                  sub: org && org.status !== "progress" ? "of agreed, month closed" : `of agreed, ${LBL.daysLeft}`,
+                  live: !org || org.status === "progress",
+                },
+            { label: "Closed", value: `${sum.closed} of ${sum.total}` },
+            {
+              label: "Flagged",
+              value: String(flagged),
+              sub: flagged ? `${flaggedTracker} in Tracker · ${flaggedPitch} in Pitch${flaggedBoth ? ` · ${flaggedBoth} in both` : ""}` : "Nothing waiting on an owner",
+            },
+          ]}
+        />
 
         {banner && <SinceLocked onClose={() => setBanner(false)} onItem={jump} />}
 
         {/* filters */}
         <div className="flex flex-wrap items-center gap-1.5">
           {FILTERS.map((x) => (
-            <Dropdown key={x.key} label={x.label} value={f[x.key]} options={[...x.options]} onChange={(v) => setF((s) => ({ ...s, [x.key]: v }))} />
+            <Dropdown
+              key={x.key}
+              label={x.label}
+              value={f[x.key]}
+              options={x.key === "territory" ? [...scope.territories] : x.key === "owner" ? scope.execs : [...x.options]}
+              onChange={(v) => setF((s) => ({ ...s, [x.key]: v }))}
+            />
           ))}
           <span className="ml-1 text-[12px] text-cx-faint">
             Showing <span className="font-data text-cx-muted">{rows.length}</span> of <span className="font-data text-cx-muted">{PLAN.length}</span>
           </span>
           {Object.values(f).some(Boolean) && (
-            <button onClick={() => setF({ territory: null, channel: null, product: null, sector: null, lever: null, priority: null, status: null, pushed: null })} className="text-[12px] text-cx-muted hover:text-cx-text">
+            <button onClick={() => setF(NO_FILTERS)} className="text-[12px] text-cx-muted hover:text-cx-text">
               Clear
             </button>
           )}
@@ -449,7 +580,16 @@ function PlanDetail({ planId, onBack }: { planId: "sep" | "oct"; onBack: () => v
               <tbody>
                 <tr>
                   <td colSpan={9} className="px-5 py-8 text-center text-[12.5px] text-cx-faint">
-                    No initiative matches these filters.
+                    {PLAN.length === 0 ? (
+                      <NoDataCard
+                        bare
+                        title="No initiatives in this plan"
+                        detail={`The backend sent no initiatives for ${scope.place} · ${meta.label}. Rows appear here once the workbook carries signals or targets for it.`}
+                        source={org ? `GET /api/web/sections/org · ORG_INITIATIVES[${org.id}]` : "GET /api/web/sections/map · SEP_INITIATIVES"}
+                      />
+                    ) : (
+                      "No initiative matches these filters."
+                    )}
                   </td>
                 </tr>
               </tbody>
@@ -458,6 +598,8 @@ function PlanDetail({ planId, onBack }: { planId: "sep" | "oct"; onBack: () => v
               <InitiativeRow
                 key={i.id}
                 i={i}
+                asm={scope.owner}
+                plan={{ label: `${head ? `${scope.owner} · ` : ""}${scope.place} · ${meta.label}`, id: org?.id }}
                 open={open === i.id}
                 onToggle={() => setOpen((o) => (o === i.id ? null : i.id))}
                 pitch={pitchOf(i)}
@@ -477,8 +619,10 @@ function PlanDetail({ planId, onBack }: { planId: "sep" | "oct"; onBack: () => v
 function SinceLocked({ onClose, onItem }: { onClose: () => void; onItem: (id: string) => void }) {
   const go = useCortexNav();
   const { toast } = useHome();
+  const head = useReadOnly();
   const n = SINCE_LOCKED.signals.length + SINCE_LOCKED.feedback.length;
-  const title = (id: string) => SEP_INITIATIVES.find((i) => i.id === id)!.title;
+  // a signal can point at a row the plan no longer carries; then it shows without its "On item" link
+  const title = (id: string) => SEP_INITIATIVES.find((i) => i.id === id)?.title;
   return (
     <section aria-label="New since this plan" className="overflow-hidden rounded-lg border border-[#e0b43a]/35 bg-[#e0b43a]/[0.05]">
       <div className="flex flex-wrap items-center gap-3 border-b border-[#e0b43a]/25 px-5 py-3">
@@ -493,6 +637,7 @@ function SinceLocked({ onClose, onItem }: { onClose: () => void; onItem: (id: st
       <div className="grid md:grid-cols-2">
         <div className="px-5 py-4">
           <p className="mb-2.5 text-[11.5px] text-cx-faint">Signals</p>
+          {SINCE_LOCKED.signals.length === 0 && <p className="text-[12.5px] text-cx-faint">No new signals since the plan was built.</p>}
           <ul className="space-y-3">
             {SINCE_LOCKED.signals.map((s) => (
               <li key={s.text} className="flex gap-3">
@@ -502,14 +647,16 @@ function SinceLocked({ onClose, onItem }: { onClose: () => void; onItem: (id: st
                     <span>
                       <span className="text-cx-text">{AGENTS[s.agent].name}</span> <span className="text-cx-faint">· {s.when}</span>
                     </span>
-                    <button onClick={() => (s.agent === "thermometer" ? go("thermometer") : go("huddle"))} className="text-[#4f86f7] hover:underline">
+                    <button onClick={() => (s.agent === "thermometer" ? go(head ? "thermometer-head" : "thermometer") : go("huddle"))} className="text-[#4f86f7] hover:underline">
                       Open in {AGENTS[s.agent].name}
                     </button>
                   </p>
                   <p className="mt-0.5 text-[12.5px] leading-snug text-cx-muted">{s.text}</p>
-                  <button onClick={() => onItem(s.item)} className="mt-0.5 text-[12px] text-[#4f86f7] hover:underline">
-                    On item: {title(s.item)}
-                  </button>
+                  {title(s.item) && (
+                    <button onClick={() => onItem(s.item)} className="mt-0.5 text-[12px] text-[#4f86f7] hover:underline">
+                      On item: {title(s.item)}
+                    </button>
+                  )}
                 </div>
               </li>
             ))}
@@ -517,6 +664,7 @@ function SinceLocked({ onClose, onItem }: { onClose: () => void; onItem: (id: st
         </div>
         <div className="border-t border-[#e0b43a]/25 px-5 py-4 md:border-l md:border-t-0">
           <p className="mb-2.5 text-[11.5px] text-cx-faint">Sales Executive visit feedback · from SFA</p>
+          {SINCE_LOCKED.feedback.length === 0 && <p className="text-[12.5px] text-cx-faint">No visit feedback from SFA since the plan was built.</p>}
           <ul className="space-y-3">
             {SINCE_LOCKED.feedback.map((s) => (
               <li key={s.text}>
@@ -524,9 +672,11 @@ function SinceLocked({ onClose, onItem }: { onClose: () => void; onItem: (id: st
                   <span className="text-cx-text">{s.by}</span> <span className="text-cx-faint">at {s.at} · {s.when} · {s.kind}</span>
                 </p>
                 <p className="mt-0.5 text-[12.5px] leading-snug text-cx-muted">{s.text}</p>
-                <button onClick={() => onItem(s.item)} className="mt-0.5 text-[12px] text-[#4f86f7] hover:underline">
-                  On item: {title(s.item)}
-                </button>
+                {title(s.item) && (
+                  <button onClick={() => onItem(s.item)} className="mt-0.5 text-[12px] text-[#4f86f7] hover:underline">
+                    On item: {title(s.item)}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -538,6 +688,8 @@ function SinceLocked({ onClose, onItem }: { onClose: () => void; onItem: (id: st
 
 function InitiativeRow({
   i,
+  asm,
+  plan,
   open,
   onToggle,
   pitch,
@@ -546,6 +698,10 @@ function InitiativeRow({
   onTakeBack,
 }: {
   i: Initiative;
+  /** the ASM who owns this plan; a Head of Sales comment becomes their delegation ticket */
+  asm: string;
+  /** the plan this row sits in, carried into Pitch as the breadcrumb trail */
+  plan: { label: string; id?: string };
   open: boolean;
   onToggle: () => void;
   pitch: Initiative["pitch"];
@@ -553,7 +709,10 @@ function InitiativeRow({
   onPush: () => void;
   onTakeBack: () => void;
 }) {
+  const head = useReadOnly();
   const st = INIT_STATUS[i.status];
+  const origin: PitchOrigin = { plan: plan.label, planId: plan.id, n: i.n, initiative: i.title };
+  const [escalate, setEscalate] = useState(false);
   const pct = i.delivered != null && i.agreed ? Math.round((i.delivered / i.agreed) * 100) : null;
   const pctColor = pct == null ? "text-cx-faint" : pct >= 95 ? "text-[#2fa85c]" : pct < 50 ? "text-[#e85a70]" : "text-[#e0b43a]";
   const [run, setRun] = useState<{ run: AgentRun; key: number } | null>(null);
@@ -597,7 +756,7 @@ function InitiativeRow({
           <DotStatus color={st.color}>{st.label}</DotStatus>
         </td>
         <td className={`${td} text-[12px] leading-snug text-cx-text`}>
-          <PushedTo i={i} pitch={pitch} removed={removed} />
+          <PushedTo i={i} pitch={pitch} removed={removed} origin={origin} />
         </td>
         <td className={`${td} text-right`}>
           <Value i={i} v={i.est} />
@@ -611,16 +770,29 @@ function InitiativeRow({
         <td className={`${td} text-right font-data text-[12.5px] ${pctColor}`}>{pct != null ? `${pct}%` : "—"}</td>
         <td className="py-3 pl-3 pr-5 align-top" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-start justify-end">
-            <RowActions
-              i={i}
-              inPitch={!!pitch}
-              onPush={() => {
-                onPush();
-                setRun({ run: { agent: "pitch", steps: ["matching outlets on the beat", "adding the talking point", "routing to SFA"], result: `Pushed to Pitch · ${i.owner} · ${(SUGGESTED_OUTLETS[i.id] ?? i.pitch?.outlets ?? []).length} outlets`, link: "View in Pitch" }, key: Date.now() });
-              }}
-              onTakeBack={onTakeBack}
-              onComment={() => !open && onToggle()}
-            />
+            {head ? (
+              <button
+                onClick={() => !open && onToggle()}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-cx-line px-2.5 text-[12px] text-cx-muted hover:border-cx-strong hover:text-cx-text"
+                title={`Comment for ${asm}. It becomes a delegation ticket they own.`}
+              >
+                <MessageSquare className="h-3.5 w-3.5" /> Comment
+              </button>
+            ) : (
+              <RowActions
+                i={i}
+                inPitch={!!pitch}
+                pitch={pitch}
+                origin={origin}
+                onPush={() => {
+                  onPush();
+                  setRun({ run: { agent: "pitch", steps: ["matching outlets on the beat", "adding the talking point", "routing to SFA"], result: `Pushed to Pitch · ${i.owner} · ${(SUGGESTED_OUTLETS[i.id] ?? i.pitch?.outlets ?? []).length} outlets`, link: "View in Pitch" }, key: Date.now() });
+                }}
+                onTakeBack={onTakeBack}
+                onComment={() => (setEscalate(false), !open && onToggle())}
+                onEscalate={() => (setEscalate(true), !open && onToggle())}
+              />
+            )}
           </div>
           {run && (
             <div className="mt-2 flex justify-end">
@@ -632,11 +804,119 @@ function InitiativeRow({
       {open && (
         <tr>
           <td colSpan={9} className="bg-cx-hover/20 px-5 pb-5 pt-1">
-            <Expanded i={i} pitch={pitch} />
+            <Expanded i={i} asm={asm} plan={plan} pitch={pitch} origin={origin} escalate={escalate} onEscalated={() => setEscalate(false)} />
           </td>
         </tr>
       )}
     </tbody>
+  );
+}
+
+/**
+ * Escalate to Sales Head — the ASM's way out of a call they can't make on their own. Everything
+ * else in the Actions menu stays inside their own authority: a push, a ticket, a comment to
+ * someone who reports to them. This one goes the other way, and arrives on the Head of Sales's
+ * homepage as a numbered item in "Needs your decision", with the plan row as its context.
+ */
+function Escalate({ i, plan, open, onSent }: { i: Initiative; plan: { label: string }; open: boolean; onSent: () => void }) {
+  const nt = useAssignments();
+  const { toast } = useHome();
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  /** set when it was sent from this page, so the agent run plays once */
+  const [runKey, setRunKey] = useState<number | null>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+  // the backend holds the escalation, so it is still here after a reload and on every device
+  const stored = nt.escalations[i.id];
+  useEffect(() => {
+    if (open && !stored) box.current?.focus();
+  }, [open, stored]);
+  if (!open && !stored) return null;
+
+  const send = () => {
+    const note = text.trim();
+    if (!note || busy) return;
+    setBusy(true);
+    nt.escalate({ source_id: i.id, kind: "plan", title: i.title, note, territory: i.territory, priority: i.priority })
+      .then(() => {
+        setText("");
+        setRunKey(Date.now());
+        onSent();
+      })
+      .catch((e: Error) => toast(`Couldn't escalate: ${e.message}`))
+      .finally(() => setBusy(false));
+  };
+  const sent = stored ? { text: stored.note, id: stored.id, at: stored.at } : null;
+
+  return (
+    <div>
+      <p className="text-[11.5px] text-cx-faint">Escalate to Sales Head</p>
+      {sent ? (
+        <div className="mt-1.5 space-y-1.5">
+          <div className="rounded-lg border border-cx-line bg-cx-panel px-3.5 py-2.5">
+            <p className="text-[12px]">
+              <span className="text-cx-text">You</span> <span className="text-cx-faint">· {runKey ? "just now" : sent.at} · to {LBL.headName}</span>
+              <span className="ml-2 font-data text-[11px] text-[#4f86f7]">{sent.id}</span>
+            </p>
+            <p className="mt-0.5 text-[12.5px] leading-snug text-cx-text">{sent.text}</p>
+          </div>
+          {runKey && (
+            <AgentRunChip
+              key={runKey}
+              run={{
+                agent: "map",
+                steps: ["attaching the plan row and its evidence", "checking it against the decision thresholds", `placing it in ${LBL.headName}'s queue`],
+                // no link: the decision sits on the Sales Head's homepage, which the ASM can't open
+                result: `${sent.id} is in ${LBL.headName}'s Needs your decision · ${i.priority} priority`,
+              }}
+              block
+            />
+          )}
+          <p className="flex flex-wrap items-center gap-x-3 text-[11.5px] text-cx-faint">
+            #{i.n} stays yours until they answer. The answer lands back on this row.
+            <button
+              onClick={() => nt.withdraw(i.id).then(() => toast(`${sent.id} withdrawn from ${LBL.headName}'s queue.`)).catch((e: Error) => toast(`Couldn't withdraw: ${e.message}`))}
+              className="text-cx-muted hover:text-cx-text"
+            >
+              Withdraw
+            </button>
+          </p>
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            send();
+          }}
+          className="mt-1.5 rounded-lg border border-cx-strong bg-cx-panel focus-within:border-[#2f6fed]/70"
+        >
+          <label className="sr-only" htmlFor={`esc-${i.id}`}>
+            What do you need {LBL.headName} to decide on #{i.n}?
+          </label>
+          <textarea
+            id={`esc-${i.id}`}
+            ref={box}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+            rows={2}
+            placeholder={`What do you need ${LBL.headName} to decide on #${i.n}?`}
+            className="block w-full resize-none bg-transparent px-3 pt-2.5 text-[13px] text-cx-text placeholder:text-cx-faint focus:outline-none"
+          />
+          <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-2">
+            <span className="pl-1 text-[11px] text-cx-faint">Goes with {plan.label} · #{i.n}</span>
+            <button type="submit" disabled={!text.trim() || busy} className="inline-flex h-7 items-center rounded-md bg-[#2f6fed] px-2.5 text-[12px] font-medium text-white hover:bg-[#4f86f7] disabled:opacity-40">
+              {busy ? "Escalating…" : "Escalate"}
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
   );
 }
 
@@ -652,14 +932,36 @@ function Value({ i, v }: { i: Initiative; v: number | null }) {
   );
 }
 
+/** Open the pitch this initiative reached, carrying the plan row it came from. An initiative
+ *  already links to its Tracker ticket; this is the same move for the other destination. */
+function PitchLink({ outlet, origin, children }: { outlet: string; origin: PitchOrigin; children?: React.ReactNode }) {
+  const go = useCortexNav();
+  const head = useReadOnly();
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        setOpenPitch(`p-${outlet.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, origin);
+        go(head ? "pitch-detail-head" : "pitch-detail");
+      }}
+      className="text-left text-[#4f86f7] hover:underline"
+      aria-label={`Open the pitch for ${outlet}${head ? ", read-only" : ""}`}
+      title={`Open the pitch for ${outlet}${head ? " · read-only" : ""}`}
+    >
+      {children ?? outlet}
+    </button>
+  );
+}
+
 function TicketLink({ id }: { id: string }) {
   const go = useCortexNav();
+  const head = useReadOnly();
   return (
     <button
       onClick={(e) => {
         e.stopPropagation();
         openTicket(id);
-        go("tracker");
+        go(head ? "tracker-head" : "tracker");
       }}
       className="font-data text-[#4f86f7] hover:underline"
     >
@@ -668,7 +970,7 @@ function TicketLink({ id }: { id: string }) {
   );
 }
 
-function PushedTo({ i, pitch, removed }: { i: Initiative; pitch: Initiative["pitch"]; removed: boolean }) {
+function PushedTo({ i, pitch, removed, origin }: { i: Initiative; pitch: Initiative["pitch"]; removed: boolean; origin: PitchOrigin }) {
   const lines: React.ReactNode[] = [];
   if (i.ticket)
     lines.push(
@@ -681,7 +983,15 @@ function PushedTo({ i, pitch, removed }: { i: Initiative; pitch: Initiative["pit
   if (pitch)
     lines.push(
       <span key="p" className="block">
-        Pitch · {i.owner} · {pitch.outlets.length} outlet{pitch.outlets.length === 1 ? "" : "s"}
+        Pitch · {i.owner}
+        <span className="block">
+          {pitch.outlets.map((o, k) => (
+            <React.Fragment key={o}>
+              {k > 0 && <span className="text-cx-faint">, </span>}
+              <PitchLink outlet={o} origin={origin} />
+            </React.Fragment>
+          ))}
+        </span>
         <span className="block text-[11px] text-cx-faint">{pitch.mode === "auto" ? `Auto-pushed · ${i.priority} · ${pitch.at}` : "Pushed by you"}</span>
       </span>
     );
@@ -695,7 +1005,25 @@ function PushedTo({ i, pitch, removed }: { i: Initiative; pitch: Initiative["pit
   return <span className="space-y-1">{lines}</span>;
 }
 
-function RowActions({ i, inPitch, onPush, onTakeBack, onComment }: { i: Initiative; inPitch: boolean; onPush: () => void; onTakeBack: () => void; onComment: () => void }) {
+function RowActions({
+  i,
+  inPitch,
+  pitch,
+  origin,
+  onPush,
+  onTakeBack,
+  onComment,
+  onEscalate,
+}: {
+  i: Initiative;
+  inPitch: boolean;
+  pitch: Initiative["pitch"];
+  origin: PitchOrigin;
+  onPush: () => void;
+  onTakeBack: () => void;
+  onComment: () => void;
+  onEscalate: () => void;
+}) {
   const go = useCortexNav();
   const [open, setOpen] = useState(false);
   const { toast } = useHome();
@@ -707,14 +1035,32 @@ function RowActions({ i, inPitch, onPush, onTakeBack, onComment }: { i: Initiati
       .then((r) => toast(`${r.action.id}: ${assignToast(i.owner === MAP_LABELS.asm ? "Me" : i.owner, r)}`))
       .catch((e: Error) => toast(`Couldn't create the ticket: ${e.message}`));
   const ref = useOutside<HTMLDivElement>(open, () => setOpen(false));
+  const first = pitch?.outlets[0];
   const items = [
+    // an initiative in Pitch opens its pitch, the way one with a ticket opens its ticket
+    ...(inPitch && first
+      ? [
+          {
+            label: `Open the pitch · ${first}`,
+            sub: pitch!.outlets.length > 1 ? `First of ${pitch!.outlets.length} on ${i.owner}'s beats` : `On ${i.owner}'s beat`,
+            run: () => {
+              setOpenPitch(`p-${first.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, origin);
+              go("pitch-detail");
+            },
+          },
+        ]
+      : []),
     inPitch
       ? { label: "Take back from Pitch", sub: `Removes the talking point from ${i.owner}'s pitch`, run: onTakeBack }
-      : { label: `Push to Pitch · ${i.owner}`, sub: `${(SUGGESTED_OUTLETS[i.id] ?? i.pitch?.outlets ?? []).length} outlets on his beats`, run: onPush },
+      : { label: `Push to Pitch · ${i.owner}`, sub: `${(SUGGESTED_OUTLETS[i.id] ?? i.pitch?.outlets ?? []).length} outlets on ${i.owner}'s beats`, run: onPush },
     i.ticket
       ? { label: `Open ${i.ticket} in Tracker`, sub: `Owned by ${i.owner}`, run: () => (openTicket(i.ticket!), go("tracker")) }
       : { label: "Send to Tracker", sub: `Creates a ticket for ${i.owner}`, run: send },
     { label: "Comment", sub: `Creates a ticket for ${i.owner}`, run: onComment },
+    // the one call that leaves the ASM's hands: above their authority, or theirs to escalate
+    nt.escalations[i.id]
+      ? { label: `${nt.escalations[i.id].id} · with ${LBL.headName}`, sub: "Escalated · open the row to see it or withdraw it", run: onEscalate }
+      : { label: "Escalate to Sales Head", sub: `Raises it to ${LBL.headName} as a decision`, run: onEscalate },
   ];
   return (
     <div ref={ref} className="relative">
@@ -748,8 +1094,25 @@ function RowActions({ i, inPitch, onPush, onTakeBack, onComment }: { i: Initiati
   );
 }
 
-function Expanded({ i, pitch }: { i: Initiative; pitch: Initiative["pitch"] }) {
+function Expanded({
+  i,
+  asm,
+  plan,
+  pitch,
+  origin,
+  escalate,
+  onEscalated,
+}: {
+  i: Initiative;
+  asm: string;
+  plan: { label: string; id?: string };
+  pitch: Initiative["pitch"];
+  origin: PitchOrigin;
+  escalate: boolean;
+  onEscalated: () => void;
+}) {
   const { toast } = useHome();
+  const head = useReadOnly();
   const nt = useAssignments();
   const [text, setText] = useState("");
   const [sent, setSent] = useState<{ text: string; key: number; ticket: string }[]>([]);
@@ -773,8 +1136,8 @@ function Expanded({ i, pitch }: { i: Initiative; pitch: Initiative["pitch"] }) {
       <div className="min-w-0 space-y-4">
         <p className="text-[13px] leading-relaxed text-cx-text">{i.description}</p>
         <div className="flex flex-wrap gap-3">
-          <TraceTooltip trace={trace} label="Why it's in the plan" />
-          {ptrace && <TraceTooltip trace={ptrace} label="How it reached Pitch" />}
+          <TraceTrigger trace={trace} source="Market Action Plan Initiative" title={i.title} label="Why it's in the plan" />
+          {ptrace && <TraceTrigger trace={ptrace} source="Market Action Plan Initiative" title={i.title} label="How it reached Pitch" />}
         </div>
         <div>
           <p className={label}>Action steps</p>
@@ -788,9 +1151,29 @@ function Expanded({ i, pitch }: { i: Initiative; pitch: Initiative["pitch"] }) {
         </div>
         <p className="text-[12.5px] text-cx-muted">
           Pushed to:{" "}
-          <span className="text-cx-text">
-            {[i.ticket && `${i.owner} (Sales Executive) · ${i.ticket}`, pitch && `Pitch · ${pitch.outlets.join(", ")}`].filter(Boolean).join(" · ") || "Not pushed yet"}
-          </span>
+          {!i.ticket && !pitch ? (
+            <span className="text-cx-text">Not pushed yet</span>
+          ) : (
+            <span className="text-cx-text">
+              {i.ticket && (
+                <>
+                  {i.owner} (Sales Executive) · <TicketLink id={i.ticket} />
+                </>
+              )}
+              {i.ticket && pitch && " · "}
+              {pitch && (
+                <>
+                  Pitch ·{" "}
+                  {pitch.outlets.map((o, k) => (
+                    <React.Fragment key={o}>
+                      {k > 0 && ", "}
+                      <PitchLink outlet={o} origin={origin} />
+                    </React.Fragment>
+                  ))}
+                </>
+              )}
+            </span>
+          )}
         </p>
         <p className="text-[12px] text-cx-faint">
           {i.channel} · {i.product} · {i.sector} · {i.lever}
@@ -811,10 +1194,13 @@ function Expanded({ i, pitch }: { i: Initiative; pitch: Initiative["pitch"] }) {
         <div>
           <p className={label}>Attachments</p>
           <p className="mt-1 text-[12.5px] text-cx-muted">{i.attachments ? `${i.attachments} document${i.attachments === 1 ? "" : "s"}` : "None on this item."}</p>
-          <button onClick={() => toast("Attach an invoice, photo or PDF to this initiative.")} className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-cx-line px-2.5 text-[12px] text-cx-muted hover:border-cx-strong hover:text-cx-text">
-            <Paperclip className="h-3.5 w-3.5" /> Attach a document
-          </button>
+          {!head && (
+            <button onClick={() => toast("Attach an invoice, photo or PDF to this initiative.")} className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-cx-line px-2.5 text-[12px] text-cx-muted hover:border-cx-strong hover:text-cx-text">
+              <Paperclip className="h-3.5 w-3.5" /> Attach a document
+            </button>
+          )}
         </div>
+        {!head && <Escalate i={i} plan={plan} open={escalate} onSent={onEscalated} />}
         <div>
           <p className={label}>Comments</p>
           <div className="mt-1.5 space-y-2">
@@ -842,27 +1228,34 @@ function Expanded({ i, pitch }: { i: Initiative; pitch: Initiative["pitch"] }) {
               </div>
             ))}
           </div>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              send();
-            }}
-            className="mt-2 flex gap-2"
-          >
-            <label htmlFor={`cm-${i.id}`} className="sr-only">
-              Comment for {i.owner}
-            </label>
-            <input
-              id={`cm-${i.id}`}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder={`Comment — creates a ticket for ${i.owner}`}
-              className="h-9 min-w-0 flex-1 rounded-md border border-cx-strong bg-cx-bg px-3 text-[12.5px] text-cx-text placeholder:text-cx-faint focus:border-[#2f6fed]/70 focus:outline-none"
-            />
-            <button type="submit" disabled={!text.trim()} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f6fed] px-3 text-[12.5px] font-medium text-white hover:bg-[#4f86f7] disabled:opacity-40">
-              <Send className="h-3.5 w-3.5" /> Comment
-            </button>
-          </form>
+          {head ? (
+            // the Head of Sales comments on the ASM's plan; the comment becomes a ticket the ASM owns
+            <div className="mt-2">
+              <CommentBox asm={asm} subject={`MAP #${i.n} · ${i.title}`} />
+            </div>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                send();
+              }}
+              className="mt-2 flex gap-2"
+            >
+              <label htmlFor={`cm-${i.id}`} className="sr-only">
+                Comment for {i.owner}
+              </label>
+              <input
+                id={`cm-${i.id}`}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder={`Comment — creates a ticket for ${i.owner}`}
+                className="h-9 min-w-0 flex-1 rounded-md border border-cx-strong bg-cx-bg px-3 text-[12.5px] text-cx-text placeholder:text-cx-faint focus:border-[#2f6fed]/70 focus:outline-none"
+              />
+              <button type="submit" disabled={!text.trim()} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f6fed] px-3 text-[12.5px] font-medium text-white hover:bg-[#4f86f7] disabled:opacity-40">
+                <Send className="h-3.5 w-3.5" /> Comment
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </div>

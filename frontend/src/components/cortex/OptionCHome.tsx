@@ -9,6 +9,7 @@
 import { LBL } from "@/data/labels";
 import React, { useEffect, useRef, useState } from "react";
 import {
+  ArrowUpRight,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -76,13 +77,15 @@ import { MapPanel } from "./sections";
 import { AgentIcon, CortexMark, StatusBadge } from "./primitives";
 import { CortexPageRoot, PageFrame, Persona, useOutside } from "./shell";
 import { assignToast, assignmentLine, useAssignments } from "./assignments";
+import { DemoScopeChip, FeedEmpty, FeedSheet } from "./feedSheet";
+import { DEMO_SCENARIO, useDemoScope } from "@/data/demo";
 import { useCortexNav } from "./nav";
 import { useAsmNav } from "./asmNav";
 import { PeriodFilter, periodDetail, periodLabel, periodMonths, usePeriod } from "./period";
 import { useOctPlan } from "./map/octPlan";
-import { openOctoberPlan } from "./map/MapPlansPage";
+import { openOctoberPlan } from "./map/openPlan";
 import { closedInsights, livePlanMonths, useLoop } from "./tracker/loop";
-import { SuggestedOutcome } from "./actionTrace";
+import { SuggestedOutcome, TraceSubject, TraceTrigger } from "./actionTrace";
 import { ACTION_TRACES, REC_SUGGESTED, ROUTE_DONE_LABEL } from "@/data/actionTraces";
 import { CardHeader, Dropdown, Eyebrow, KpiStripes, blueRamp, card } from "./kit";
 
@@ -585,47 +588,80 @@ function KpiCards({ persona }: { persona: "asm" | "head" }) {
 // Insights (prominent, right below the hero)
 // ---------------------------------------------------------------------------
 
+/**
+ * The marking both Insights and Since this morning use, so the two cards read as one language.
+ * Teal already means "just happened" here (the Live dot, cx-flash); blue already means "do this".
+ */
+function NewTag() {
+  return (
+    <span className="inline-flex h-[18px] shrink-0 items-center rounded-full border border-ai/40 bg-ai/10 px-1.5 font-data text-[10px] uppercase tracking-[0.06em] text-ai">New</span>
+  );
+}
+function ActionTag() {
+  return (
+    <span className="inline-flex h-[18px] shrink-0 items-center rounded-full border border-[#2f6fed]/45 bg-[#2f6fed]/15 px-1.5 font-data text-[10px] uppercase tracking-[0.06em] text-[color:var(--ai-ink)]">
+      Action
+    </span>
+  );
+}
+/** a new row sits on a teal wash, full-bleed across the card's padding */
+const newRow = "-mx-5 bg-ai/[0.08] px-5";
+
 /** Suggested action on an insight: what Sales AI already did (outcome + ✓), or Agreed / Closed when handled. */
-function InsightAction({ id, from = INSIGHT_ACTIONS, bare = false }: { id: string; from?: typeof INSIGHT_ACTIONS; bare?: boolean }) {
+function InsightAction({ id, from = INSIGHT_ACTIONS, bare = false, source, title }: TraceSubject & { id: string; from?: typeof INSIGHT_ACTIONS; bare?: boolean }) {
   // a ticket verified in the Action Tracker closes the insight it came from (use-case step 11)
   const loopClosed = closedInsights(useLoop())[id];
+  const trace = ACTION_TRACES[id];
   const a = loopClosed ? { closed: `Closed · ${loopClosed}` } : from[id];
   if (!a) return null;
-  if ("closed" in a || "agreed" in a) {
-    const agreed = "agreed" in a;
+  if (!("label" in a)) {
+    // already handled: say how it was settled rather than offering an action on it again
+    const r =
+      "done" in a
+        ? { tag: "Done", note: a.done, green: true }
+        : "agreed" in a
+          ? { tag: "Agreed", note: a.agreed, green: true }
+          : { tag: a.bySfa ? "Closed by SFA" : "Closed", note: a.closed, green: false };
     return (
-      <p className={`${bare ? "" : "mt-2.5"} flex h-8 items-center gap-2 rounded-md border border-cx-line px-2.5 text-[11.5px] text-cx-faint`}>
+      // a div, not a p: the trace trigger mounts its modal here, and <header> inside <p> is invalid
+      <div className={`${bare ? "" : "mt-2.5"} flex min-h-8 items-center gap-2 rounded-md border border-cx-line px-2.5 py-1.5 text-[11.5px] text-cx-faint`} title={r.note}>
         <span
           className="shrink-0 rounded px-1.5 font-data text-[10px] uppercase tracking-[0.06em]"
-          style={{ background: agreed ? `${STATUS_META.done.color}26` : "rgb(var(--cx-raised))", color: agreed ? STATUS_META.done.color : "rgb(var(--cx-muted))" }}
+          style={{ background: r.green ? `${STATUS_META.done.color}26` : "rgb(var(--cx-raised))", color: r.green ? STATUS_META.done.color : "rgb(var(--cx-muted))" }}
         >
-          {agreed ? "Agreed" : "Closed"}
+          {r.tag}
         </span>
-        <span className="truncate">{(agreed ? a.agreed : a.closed).replace(/^(Agreed|Closed) · /, "")}</span>
-      </p>
+        <span className="min-w-0 flex-1 truncate">{r.note.replace(/^(Done|Agreed|Closed by SFA|Closed) · /, "")}</span>
+        {trace && <TraceTrigger trace={trace} source={source} title={title} compact />}
+      </div>
     );
   }
   // already done by Sales AI: reads as an outcome, with its own trace (see <SuggestedRow>)
   return (
     <div className={bare ? "" : "mt-2.5"}>
-      <SuggestedOutcome label={a.label} trace={ACTION_TRACES[id]} />
+      <SuggestedOutcome id={id} label={a.label} trace={ACTION_TRACES[id]} source={source} title={title} run={a.run} />
     </div>
   );
 }
 
-/** Actions menu + the suggested action's outcome (its trace opens as a tooltip). */
-function SuggestedRow({ id, from = INSIGHT_ACTIONS, rec, routeKey }: { id: string; from?: typeof INSIGHT_ACTIONS; rec?: Recommendation; routeKey: string }) {
+/** Actions menu + the suggested action's outcome (its trace opens as the "How it was decided" modal). */
+function SuggestedRow({ id, from = INSIGHT_ACTIONS, rec, routeKey, source, title }: TraceSubject & { id: string; from?: typeof INSIGHT_ACTIONS; rec?: Recommendation; routeKey: string }) {
+  // The run result gets its own line. Beside the suggested outcome it won a width fight it
+  // should never have been in, and crushed the pill next to it to a sliver.
   const [run, setRun] = useState<{ run: AgentRun; key: number } | null>(null);
+  const a = from[id];
+  // already settled — by an agent, by the ASM, or by SFA closing the loop — so there is
+  // nothing to offer: the resolved label stands on its own (see <InsightAction>)
+  const resolved = (a && !("label" in a)) || !!closedInsights(useLoop())[id];
   return (
     <div className="space-y-2">
       <div className="flex items-start gap-2">
-        {rec && <ActionsDropdown routeKey={routeKey} rec={rec} onRun={(r) => setRun({ run: r, key: Date.now() })} />}
+        {rec && !resolved && <ActionsDropdown routeKey={routeKey} rec={rec} onRun={(r) => setRun({ run: r, key: Date.now() })} />}
         <div className="min-w-0 flex-1">
-          <InsightAction id={id} from={from} bare />
+          <InsightAction id={id} from={from} source={source} title={title} bare />
         </div>
       </div>
-      {/* the run chip spans the full row, so it never squeezes the outcome beside the Actions button */}
-      {run && <AgentRunChip key={run.key} run={run.run} />}
+      {run && <AgentRunChip key={run.key} run={run.run} block />}
     </div>
   );
 }
@@ -633,6 +669,9 @@ function SuggestedRow({ id, from = INSIGHT_ACTIONS, rec, routeKey }: { id: strin
 function InsightsCard() {
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [sheet, setSheet] = useState<string | null | false>(false);
+  // a walkthrough stays on its own thread; everything else is under View all
+  const [scope] = useDemoScope();
+  const scoped = scope ? INSIGHTS.filter((i) => DEMO_SCENARIO.insights.includes(i.id)) : INSIGHTS;
   return (
     <section id="insights" className={`${card} flex h-full flex-col p-5`}>
       <CardHeader
@@ -645,28 +684,35 @@ function InsightsCard() {
           </span>
         }
         right={
-          <button onClick={() => setSheet(null)} className="inline-flex items-center gap-1 text-[12px] text-cx-muted hover:text-cx-text">
-            View all <ChevronRight className="h-3 w-3" />
-          </button>
+          <span className="flex items-center gap-2">
+            <DemoScopeChip shown={Math.min(scoped.length, 3)} total={INSIGHTS.length} />
+            <button onClick={() => setSheet(null)} className="inline-flex items-center gap-1 whitespace-nowrap text-[12px] text-cx-muted hover:text-cx-text">
+              View all <ChevronRight className="h-3 w-3" />
+            </button>
+          </span>
         }
       />
-      {/* two full lines, then "View more" */}
-      <p className={`mt-3 text-[13.5px] leading-relaxed text-cx-text ${summaryOpen ? "" : "line-clamp-2"}`}>
-        {INSIGHTS_SUMMARY.text}
-      </p>
-      <button onClick={() => setSummaryOpen((o) => !o)} className="mt-0.5 self-start text-[11.5px] text-cx-muted hover:text-cx-text">
-        {summaryOpen ? "View less" : "View more"}
-      </button>
+      {/* two full lines, then "View more" — no summary without insights to summarise */}
+      {INSIGHTS.length > 0 && (
+        <>
+          <p className={`mt-3 text-[13.5px] leading-relaxed text-cx-text ${summaryOpen ? "" : "line-clamp-2"}`}>{INSIGHTS_SUMMARY.text}</p>
+          <button onClick={() => setSummaryOpen((o) => !o)} className="mt-0.5 self-start text-[11.5px] text-cx-muted hover:text-cx-text">
+            {summaryOpen ? "View less" : "View more"}
+          </button>
+        </>
+      )}
+      {scoped.length === 0 && <FeedEmpty total={INSIGHTS.length} what="insights" source="GET /api/web/sections/cortexHome · INSIGHTS" />}
       <ul className="mt-3">
-        {INSIGHTS.slice(0, 3).map((ins) => (
-          <li id={ins.id} key={ins.id} className="border-t border-cx-line py-4">
+        {scoped.slice(0, 3).map((ins) => (
+          <li id={ins.id} key={ins.id} className={`border-t border-cx-line py-4 ${ins.isNew ? newRow : ""}`}>
             <div className="flex items-start gap-2.5">
               <AgentIcon agent={ins.origin.agent} size="sm" />
               <div className="min-w-0 flex-1">
                 {/* confidence sits at the far right of the title line; the title wraps cleanly beside it */}
                 <div className="flex items-start justify-between gap-3">
                   <p className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-snug text-cx-text [text-wrap:pretty]">{ins.headline}</p>
-                  <span className="shrink-0">
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {ins.isNew && <NewTag />}
                     <ConfidenceScore confidence={ins.confidence} align="right" />
                   </span>
                 </div>
@@ -677,14 +723,14 @@ function InsightsCard() {
                   </button>
                 </p>
                 <div className="mt-2.5">
-                  <SuggestedRow id={ins.id} rec={linkedRec(ins.id)} routeKey={`ins:${ins.id}`} />
+                  <SuggestedRow id={ins.id} rec={linkedRec(ins.id)} routeKey={`ins:${ins.id}`} source="Insight" title={ins.headline} />
                 </div>
               </div>
             </div>
           </li>
         ))}
       </ul>
-      {sheet !== false && <InsightsSheet focusId={sheet} onClose={() => setSheet(false)} renderAction={(id) => <SuggestedRow id={id} rec={linkedRec(id)} routeKey={`ins:${id}`} />} />}
+      {sheet !== false && <InsightsSheet focusId={sheet} onClose={() => setSheet(false)} renderAction={(id) => <SuggestedRow id={id} rec={linkedRec(id)} routeKey={`ins:${id}`} source="Insight" title={INSIGHTS.find((i) => i.id === id)?.headline ?? ""} />} />}
     </section>
   );
 }
@@ -1092,24 +1138,37 @@ function TrackerCard({ role }: { role: "asm" | "head" }) {
 
 function SinceMorningCard() {
   const { toast } = useHome();
-  const rows = FINDINGS.filter((f) => f.when.startsWith("Today")).sort((a, b) => b.when.localeCompare(a.when));
+  const [sheet, setSheet] = useState<string | null | false>(false);
+  const [scope] = useDemoScope();
+  const today = FINDINGS.filter((f) => f.when.startsWith("Today")).sort((a, b) => b.when.localeCompare(a.when));
+  const rows = scope ? today.filter((f) => DEMO_SCENARIO.findings.includes(f.id)) : today;
   return (
     <section id="findings" className={`${card} h-full p-5`}>
       <CardHeader
         icon={<MessageSquareQuote className="h-4 w-4" />}
         title="Since this morning"
         badge={<AiTag />}
-        right={<span className="font-data text-[11px] text-cx-faint">{rows.length} from Huddle</span>}
+        right={
+          <span className="flex items-center gap-2">
+            <DemoScopeChip shown={rows.length} total={today.length} />
+            <button onClick={() => setSheet(null)} className="inline-flex items-center gap-1 whitespace-nowrap text-[12px] text-cx-muted hover:text-cx-text">
+              View all <ChevronRight className="h-3 w-3" />
+            </button>
+          </span>
+        }
       />
+      {rows.length === 0 && <FeedEmpty total={today.length} what="Huddle findings today" source="GET /api/web/sections/cortexHome · FINDINGS" />}
       <ul className="mt-3">
         {rows.map((f) => (
-          <li id={f.id} key={f.id} className="group/f border-t border-cx-line py-4 first:border-t-0">
+          <li id={f.id} key={f.id} className={`group/f border-t border-cx-line py-4 first:border-t-0 ${f.isNew ? newRow : ""}`}>
             <div className="flex items-start gap-2.5">
               <AgentIcon agent="huddle" size="sm" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-3">
                   <span className="truncate pt-0.5 text-[12.5px] font-medium text-cx-text">{f.theme}</span>
-                  <span className="shrink-0">
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {f.isNew && <NewTag />}
+                    {FINDING_ACTIONS[f.id] && "label" in FINDING_ACTIONS[f.id] && <ActionTag />}
                     <ConfidenceScore confidence={f.confidence} align="right" />
                   </span>
                 </div>
@@ -1119,14 +1178,54 @@ function SinceMorningCard() {
                 </button>
                 {/* Actions (same mechanic as Thermometer) beside the Suggested action */}
                 <div className="mt-3">
-                  <SuggestedRow id={f.id} from={FINDING_ACTIONS} rec={linkedRec(f.insight)} routeKey={`find:${f.id}`} />
+                  <SuggestedRow id={f.id} from={FINDING_ACTIONS} rec={linkedRec(f.insight)} routeKey={`find:${f.id}`} source="Huddle Finding" title={`${f.theme} — “${f.quote}”`} />
                 </div>
               </div>
             </div>
           </li>
         ))}
       </ul>
+      {sheet !== false && <FindingsSheet focusId={sheet} onClose={() => setSheet(false)} />}
     </section>
+  );
+}
+
+/** Every finding Huddle has decoded, narrowed by territory, session or speaker. */
+function FindingsSheet({ focusId, onClose }: { focusId: string | null; onClose: () => void }) {
+  const { toast } = useHome();
+  return (
+    <FeedSheet
+      title="Everything since this morning"
+      subtitle={`Decoded by Huddle from today's calls and huddles · ${FINDINGS.length} findings`}
+      items={FINDINGS}
+      getId={(f) => f.id}
+      inScenario={(f) => DEMO_SCENARIO.findings.includes(f.id)}
+      facets={[
+        { key: "territory", label: "Territory", of: (f) => f.territory },
+        { key: "session", label: "Session", of: (f) => f.session },
+      ]}
+      focusId={focusId}
+      onClose={onClose}
+      renderRow={(f) => (
+        <>
+          <div className="flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2.5">
+              <AgentIcon agent="huddle" size="sm" />
+              <span className="text-[13px] font-medium text-cx-text">{f.theme}</span>
+              <span className="text-[11.5px] text-cx-faint">{f.territory}</span>
+            </span>
+            <ConfidenceScore confidence={f.confidence} align="right" />
+          </div>
+          <p className="mt-3 text-[14px] leading-relaxed text-cx-text">“{f.quote}”</p>
+          <button onClick={() => toast(`Opens the ${f.session.toLowerCase()} transcript at ${f.at}.`)} className="mt-2 block max-w-full text-left text-[11.5px] text-cx-faint hover:text-cx-text">
+            {f.speaker} · {f.speakerRole} · {f.session}, {f.when.replace("Today, ", "")} · at {f.at}
+          </button>
+          <div className="mt-3">
+            <SuggestedRow id={f.id} from={FINDING_ACTIONS} rec={linkedRec(f.insight)} routeKey={`find:${f.id}`} source="Huddle Finding" title={`${f.theme} — “${f.quote}”`} />
+          </div>
+        </>
+      )}
+    />
   );
 }
 
@@ -1206,14 +1305,21 @@ function AddWidget({ mode }: { mode: "button" | "cards" }) {
 }
 
 // ---------------------------------------------------------------------------
-// Thermometer recommendations — three destinations, any combination.
+// Thermometer recommendations — four destinations, any combination. The first three are
+// the ASM's own agents. The fourth leaves their hands: it raises the recommendation to the
+// Head of Sales as a decision, which is why it sits below a divider and carries the attention hue.
 // ---------------------------------------------------------------------------
 
 const ROUTE_META: Record<RecRoute, { color: string; icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>; idle: (r: Recommendation) => string; done: (r: Recommendation) => string }> = {
   tracker: { color: STATUS_META.done.color, icon: ListChecks, idle: () => "Send to Tracker", done: () => "In Tracker" },
   map: { color: PRIMARY_BLUE_SOFT, icon: CornerUpRight, idle: () => "Escalate to Market Action Plan", done: () => "In October plan (suggested)" },
   pitch: { color: AGENTS.pitch.color, icon: MessageSquareQuote, idle: (r) => `Send to Pitch · ${r.pitchFor}`, done: (r) => `Prioritised for ${r.pitchFor}` },
+  head: { color: "#e0b43a", icon: ArrowUpRight, idle: () => "Escalate to Sales Head", done: () => `With ${LBL.headName}` },
 };
+
+/** The ASM's own destinations; "head" is the one that goes up, and is kept apart in the menus. */
+export const OWN_ROUTES: RecRoute[] = ["tracker", "map", "pitch"];
+export const ESCALATE_ROUTE: RecRoute = "head";
 
 function RouteButtons({
   r,
@@ -1229,14 +1335,16 @@ function RouteButtons({
   onRouted?: (k: RecRoute) => void;
 }) {
   const { routes, toggleRoute, toast } = useHome();
+  const esc = useRecEscalation();
   const key = routeKey ?? r.id;
   const active = role === "head" ? HEAD_REC_ROUTES[r.id] ?? [] : routes[key] ?? [];
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      {(Object.keys(ROUTE_META) as RecRoute[]).map((k) => {
+      {(role === "head" ? OWN_ROUTES : [...OWN_ROUTES, ESCALATE_ROUTE]).map((k) => {
         const m = ROUTE_META[k];
-        const on = active.includes(k);
+        // an escalation is the backend's record, not page state
+        const on = k === ESCALATE_ROUTE ? esc.on(r) : active.includes(k);
         const Icon = on ? Check : m.icon;
         if (role === "head") {
           return (
@@ -1255,11 +1363,12 @@ function RouteButtons({
             key={k}
             aria-pressed={on}
             onClick={() => {
+              if (k === ESCALATE_ROUTE) return esc.toggle(r);
               toggleRoute(key, k);
               if (!on && onRouted) onRouted(k);
-              else toast(on ? `#${r.n} removed from ${k === "map" ? "the October plan" : k === "pitch" ? "Pitch" : "Tracker"}.` : `#${r.n}: ${m.done(r)}.`);
+              else toast(on ? `#${r.n} ${routeUndo(k)}` : `#${r.n}: ${m.done(r)}.`);
             }}
-            title={k === "pitch" ? `Prioritise for ${r.pitchFor}` : undefined}
+            title={k === "pitch" ? `Prioritise for ${r.pitchFor}` : k === "head" ? `Raises it to ${LBL.headName} as a decision; it stays yours until they answer` : undefined}
             className={`inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border px-2.5 text-[12px] transition-colors ${
               on ? "text-cx-text" : "border-cx-strong bg-cx-raised text-cx-text hover:border-cx-faint hover:bg-cx-hover"
             }`}
@@ -1274,11 +1383,43 @@ function RouteButtons({
   );
 }
 
-/** What each destination's agent does, shown as it works. */
-function routeRun(r: Recommendation, k: RecRoute): AgentRun {
+/**
+ * Escalate to Sales Head, for a recommendation: stored by the backend (POST /api/tracker/escalate) with a DEC-n id,
+ * so it reaches the Head of Sales's Needs your decision and is still there after a reload. Taking it back withdraws it.
+ */
+function useRecEscalation() {
+  const nt = useAssignments();
+  const { toast } = useHome();
+  return {
+    on: (r: Recommendation) => !!nt.escalations[r.id],
+    toggle: (r: Recommendation, onRun?: (run: AgentRun) => void) => {
+      if (nt.escalations[r.id]) {
+        const id = nt.escalations[r.id].id;
+        nt.withdraw(r.id)
+          .then(() => toast(`#${r.n}: ${id} ${routeUndo(ESCALATE_ROUTE)}`))
+          .catch((e: Error) => toast(`Couldn't withdraw: ${e.message}`));
+        return;
+      }
+      nt.escalate({ source_id: r.id, kind: "recommendation", title: r.title, territory: r.territory, note: `Decide on recommendation #${r.n}: ${r.title}` })
+        .then((e) => (onRun ? onRun(routeRun(r, ESCALATE_ROUTE, e.id)) : toast(`#${r.n}: ${e.id} is in ${LBL.headName}'s Needs your decision.`)))
+        .catch((e: Error) => toast(`Couldn't escalate: ${e.message}`));
+    },
+  };
+}
+
+/** What each destination's agent does, shown as it works. `decId` is the stored escalation's id. */
+function routeRun(r: Recommendation, k: RecRoute, decId?: string): AgentRun {
   if (k === "tracker") return { agent: "thermometer", steps: ["creating the action", "suggesting an owner"], result: `Added to Tracker — ${r.territory} queue`, link: "View in Tracker" };
   if (k === "map") return { agent: "map", steps: ["opening the October draft", "adding a suggested initiative"], result: "Added to the October plan as a suggested initiative", link: "View plan" };
+  if (k === "head")
+    // no link: the decision lands on the Sales Head's homepage, which the ASM can't open
+    return { agent: "thermometer", steps: ["attaching the signal and its evidence", "checking it against the decision thresholds", `placing it in ${LBL.headName}'s queue`], result: `${decId ?? "It"} is in ${LBL.headName}'s Needs your decision — ${r.territory}` };
   return { agent: "pitch", steps: ["updating priorities", "plan modified"], result: `Updated pitch priorities for ${r.pitchFor} — ${r.outlets} outlet${r.outlets === 1 ? "" : "s"} affected`, link: "View pitch" };
+}
+
+/** What taking a route back says, per destination. */
+export function routeUndo(k: RecRoute) {
+  return k === "map" ? "removed from the October plan." : k === "pitch" ? "removed from Pitch." : k === "head" ? `withdrawn from ${LBL.headName}'s queue.` : "removed from Tracker.";
 }
 
 /** The recommendation a finding or insight points at (for the Pitch target). */
@@ -1290,53 +1431,61 @@ function linkedRec(target: string): Recommendation | undefined {
   return RECOMMENDATIONS.find((r) => r.id === recId);
 }
 
-/** One "Actions" mechanic, shared with Thermometer: Send to Tracker · Escalate to Market Action Plan · Send to Pitch. */
+/** One "Actions" mechanic, shared with Thermometer: Send to Tracker · Escalate to Market Action
+ *  Plan · Send to Pitch, then Escalate to Sales Head below a divider. */
 function ActionsDropdown({ routeKey, rec, onRun }: { routeKey: string; rec: Recommendation; onRun: (run: AgentRun) => void }) {
   const { routes, toggleRoute, toast } = useHome();
+  const esc = useRecEscalation();
   const [open, setOpen] = useState(false);
   const ref = useOutside<HTMLDivElement>(open, () => setOpen(false));
-  const active = routes[routeKey] ?? [];
+  const active = [...(routes[routeKey] ?? []).filter((k) => k !== ESCALATE_ROUTE), ...(esc.on(rec) ? [ESCALATE_ROUTE] : [])];
   return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[12px] ${open ? "border-cx-strong bg-cx-hover text-cx-text" : "border-cx-line text-cx-muted hover:text-cx-text"}`}
-      >
-        <MoreHorizontal className="h-3.5 w-3.5" /> Actions
-        {active.length > 0 && <span className="font-data text-[10.5px] text-cx-faint">· {active.length}</span>}
-        <ChevronDown className="h-3 w-3" />
-      </button>
-      {open && (
-        <div role="menu" className="absolute left-0 top-full z-40 mt-1 w-[270px] rounded-lg border border-cx-strong bg-cx-raised p-1 shadow-2xl">
-          {(Object.keys(ROUTE_META) as RecRoute[]).map((k) => {
-            const m = ROUTE_META[k];
-            const on = active.includes(k);
-            const Icon = on ? Check : m.icon;
-            return (
-              <button
-                key={k}
-                role="menuitemcheckbox"
-                aria-checked={on}
-                onClick={() => {
-                  toggleRoute(routeKey, k);
-                  setOpen(false);
-                  if (on) toast(`Removed from ${k === "map" ? "the October plan" : k === "pitch" ? "Pitch" : "Tracker"}.`);
-                  else onRun(routeRun(rec, k));
-                }}
-                className="flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left hover:bg-cx-hover"
-              >
-                <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: m.color }} />
-                <span className="min-w-0">
-                  <span className="block text-[12.5px] text-cx-text">{on ? m.done(rec) : m.idle(rec).split(" · ")[0]}</span>
-                  {k === "pitch" && <span className="block truncate text-[11px] text-cx-faint">for {rec.pitchFor}</span>}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
+    <div className="shrink-0">
+      <div ref={ref} className="relative">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[12px] ${open ? "border-cx-strong bg-cx-hover text-cx-text" : "border-cx-line text-cx-muted hover:text-cx-text"}`}
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" /> Actions
+          {active.length > 0 && <span className="font-data text-[10.5px] text-cx-faint">· {active.length}</span>}
+          <ChevronDown className="h-3 w-3" />
+        </button>
+        {open && (
+          <div role="menu" className="absolute left-0 top-full z-40 mt-1 w-[270px] rounded-lg border border-cx-strong bg-cx-raised p-1 shadow-2xl">
+            {[...OWN_ROUTES, ESCALATE_ROUTE].map((k) => {
+              const m = ROUTE_META[k];
+              const on = active.includes(k);
+              const Icon = on ? Check : m.icon;
+              const up = k === ESCALATE_ROUTE;
+              return (
+                <button
+                  key={k}
+                  role="menuitemcheckbox"
+                  aria-checked={on}
+                  onClick={() => {
+                    setOpen(false);
+                    if (up) return esc.toggle(rec, onRun);
+                    toggleRoute(routeKey, k);
+                    if (on) toast(`#${rec.n} ${routeUndo(k)}`);
+                    else onRun(routeRun(rec, k));
+                  }}
+                  // the one destination that leaves the ASM's own agents sits below a rule
+                  className={`flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left hover:bg-cx-hover ${up ? "mt-1 border-t border-cx-line pt-2.5" : ""}`}
+                >
+                  <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: m.color }} />
+                  <span className="min-w-0">
+                    <span className="block text-[12.5px] text-cx-text">{on ? m.done(rec) : m.idle(rec).split(" · ")[0]}</span>
+                    {k === "pitch" && <span className="block truncate text-[11px] text-cx-faint">for {rec.pitchFor}</span>}
+                    {up && <span className="block truncate text-[11px] text-cx-faint">{on ? `Withdraw it from ${LBL.headName}'s queue` : "Raises it as a decision; it stays yours"}</span>}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1357,6 +1506,7 @@ const REC_FILTERS = [
 type RecFilterKey = (typeof REC_FILTERS)[number]["key"];
 
 function ThermoBox({ role }: { role: "asm" | "head" }) {
+  const go = useCortexNav();
   const { routes, decisions, decide, toggleRoute } = useHome();
   const [openRow, setOpenRow] = useState<string | null>(null);
   const [filters, setFilters] = useState<Record<RecFilterKey, string | null>>({ product: null, sector: null, segment: null, territory: null });
@@ -1384,6 +1534,20 @@ function ThermoBox({ role }: { role: "asm" | "head" }) {
             {TERRITORIES.length} territories · today
           </span>
           <AiMeta confidence={THERMO_SET_CONFIDENCE} align="right" />
+          {/* into the agent's own Recommendations tab, not an inline expand */}
+          <button
+            onClick={() => {
+              try {
+                sessionStorage.setItem("cx-thermo-tab", "recommendations");
+              } catch {
+                /* storage unavailable: the agent page opens on its default tab */
+              }
+              go(role === "head" ? "thermometer-head" : "thermometer");
+            }}
+            className="inline-flex items-center gap-1 whitespace-nowrap text-[12px] text-cx-muted hover:text-cx-text"
+          >
+            View all <ChevronRight className="h-3 w-3" />
+          </button>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 border-t border-cx-line px-5 py-3">
@@ -1493,6 +1657,7 @@ function ThermoBox({ role }: { role: "asm" | "head" }) {
                     {dismissed ? (
                       <span className="flex items-center gap-3 text-[12px] text-cx-faint">
                         Dismissed
+                        {ACTION_TRACES[r.id] && <TraceTrigger trace={ACTION_TRACES[r.id]} source="Thermometer Recommendation" title={r.title} compact />}
                         <button onClick={() => decide(r.id, null)} className="inline-flex items-center gap-1 hover:text-cx-text">
                           <Undo2 className="h-3 w-3" /> Undo
                         </button>
@@ -1504,8 +1669,11 @@ function ThermoBox({ role }: { role: "asm" | "head" }) {
                         {sug && (
                           <div className="mb-2 max-w-[360px]">
                             <SuggestedOutcome
+                              id={`${rkey}:${sug}`}
                               label={ROUTE_DONE_LABEL[sug]}
                               trace={ACTION_TRACES[r.id]}
+                              source="Thermometer Recommendation"
+                              title={r.title}
                               removed={!sugDone}
                               onRestore={() => toggleRoute(rkey, sug)}
                             />

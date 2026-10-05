@@ -5,25 +5,36 @@
 // for the ASM to confirm (review D3 / 1.1). One "Create pitches" generates every pitch
 // still missing; each one then routes to the SE's SFA app on its own. The conversational
 // studio survives as "Ad hoc pitch", a secondary path.
+//
+// The Head of Sales (/leadership/pitch) reads every ASM's board. They create nothing and
+// push nothing; they open a pitch and comment on a talking point, which becomes a
+// delegation ticket the ASM owns.
 
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowRight, ChevronDown, ChevronRight, Lightbulb, Plus, Sparkles, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Lightbulb, Plus, Sparkles, X } from "lucide-react";
 import { AgentRun, SYNC_LABEL } from "@/data/cortexHome";
 import { CATEGORIES, MAP_LABELS, SALES_EXECS, TERRITORIES, SEP_INITIATIVES, fmtValue } from "@/data/map";
-import { EMPTY_SESSION, LANGUAGES, PITCH_STATUS, Pitch, PitchSession, SUGGESTED_OUTLETS, outstandingCount, pitchTrace, pitchesFor, readSession, sourceLabel, suggestionsFor, writeSession } from "@/data/pitch";
+import { EMPTY_SESSION, LANGUAGES, Pitch, PitchSession, SUGGESTED_OUTLETS, outstandingCount, pitchesFor, readSession, suggestionsFor, writeSession } from "@/data/pitch";
 import { AgentRunChip } from "../agentRun";
-import { TraceTooltip } from "../actionTrace";
-import { AgentPageHeader, AsmAgentPage, DotStatus, PriorityPill, btn, btnPrimary } from "../agentPage";
-import { card, Dropdown } from "../kit";
+import { AgentPageHeader, AgentPersona, AsmAgentPage, PriorityPill, btn, btnPrimary } from "../agentPage";
+import { NoDataCard, card, Dropdown } from "../kit";
 import { useCortexNav } from "../nav";
 import { MultiSelect, setOpenPitch } from "./parts";
+import { SePitches } from "./SePitches";
+import { OrgPitchBoard } from "./OrgPitchBoard";
 
-export function PitchPage() {
+export function PitchPage({ persona = "asm" }: { persona?: AgentPersona }) {
   return (
-    <AsmAgentPage agent="pitch">
-      <Body />
+    <AsmAgentPage agent="pitch" persona={persona}>
+      {persona === "head" ? <OrgBoard /> : <Body />}
     </AsmAgentPage>
   );
+}
+
+/** The Head of Sales: every ASM's board, read-only, opening onto the same pitch detail. */
+function OrgBoard() {
+  const go = useCortexNav();
+  return <OrgPitchBoard onOpen={(p) => (setOpenPitch(p.id), go("pitch-detail-head"))} />;
 }
 
 const productOf = (p: Pitch) => {
@@ -165,6 +176,13 @@ function Body() {
           </section>
         )}
 
+        {all.length === 0 && suggestions.length === 0 ? (
+          <NoDataCard
+            title="No pitches yet"
+            detail={`The backend sent no pitches for ${MAP_LABELS.region}: no plan initiative has reached an outlet, and nothing is waiting to be pushed.`}
+            source="GET /api/web/sections/pitch · /sections/map"
+          />
+        ) : (
         <section aria-labelledby="se-title" className={`${card} overflow-x-auto`}>
           <h2 id="se-title" className="sr-only">
             Pitches by Sales Executive
@@ -224,58 +242,8 @@ function Body() {
             })}
           </table>
         </section>
+        )}
       </div>
-    </div>
-  );
-}
-
-function SePitches({ pitches, onOpen }: { pitches: Pitch[]; onOpen: (p: Pitch) => void }) {
-  if (!pitches.length) return <p className="py-3 pl-6 text-[12.5px] text-cx-faint">No pitch matches these filters for this Sales Executive.</p>;
-  return (
-    <div className="pl-6">
-      <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(0,1.5fr)_150px_120px_72px] gap-x-4 border-b border-cx-line py-2 text-[11px] text-cx-faint md:grid" aria-hidden>
-        <span>Outlet</span>
-        <span>Source · how it got here</span>
-        <span>Status</span>
-        <span>Points</span>
-        <span />
-      </div>
-    <ul className="divide-y divide-cx-line">
-      {pitches.map((p) => {
-        const st = PITCH_STATUS[p.status];
-        const src = p.sources.map(sourceLabel);
-        const out = outstandingCount(p);
-        return (
-          <li key={p.id} className="grid items-start gap-x-4 gap-y-2 py-3 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.5fr)_150px_120px_72px]">
-            <div className="min-w-0">
-              <p className="text-[13px] text-cx-text">
-                {p.outlet}
-                {p.news?.length ? <span className="ml-2 inline-flex h-5 items-center rounded-full border border-[#e0b43a]/40 bg-[#e0b43a]/10 px-1.5 align-middle text-[10.5px] text-[#e0b43a]">Needs update</span> : null}
-              </p>
-              <p className="text-[11.5px] text-cx-faint">
-                {p.type} · {p.territory}
-              </p>
-            </div>
-            <div className="min-w-0 text-[12px] leading-snug">
-              {src.map((s, k) => (
-                <p key={k} className="truncate text-cx-muted" title={s.text}>
-                  {s.text} <span className="text-cx-faint">· {s.mode}</span>
-                </p>
-              ))}
-              <TraceTooltip trace={pitchTrace(p)} />
-            </div>
-            <div>
-              <DotStatus color={st.color}>{st.label}</DotStatus>
-              <p className="mt-0.5 text-[11.5px] text-cx-faint">{p.status === "queued" ? "Next Create batch" : p.status === "visited" ? `${p.visited?.when} · via SFA` : `Since ${p.sfaAt}`}</p>
-            </div>
-            <p className="text-[12px] text-cx-muted">{p.status === "queued" ? "—" : out === 0 ? "All points covered" : `${out} point${out === 1 ? "" : "s"} outstanding`}</p>
-            <button onClick={() => onOpen(p)} className="inline-flex items-center gap-1 justify-self-start text-[12.5px] text-[#4f86f7] hover:underline md:justify-self-end" aria-label={`Open the pitch for ${p.outlet}`}>
-              Open <ArrowRight className="h-3 w-3" />
-            </button>
-          </li>
-        );
-      })}
-    </ul>
     </div>
   );
 }

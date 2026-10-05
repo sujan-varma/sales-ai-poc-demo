@@ -1,7 +1,7 @@
 // ASM / Sales Head homepage data. Types and UI configuration live here; every data value comes from the
 // backend (GET /api/web/bootstrap → "cortexHome"), built from the Excel workbook. See ./source.ts.
 
-import { D } from "./source";
+import { D, DOpt } from "./source";
 
 export type AgentId = "huddle" | "thermometer" | "map" | "pitch";
 export type ActionStatus = "done" | "progress" | "delayed" | "unassigned";
@@ -105,11 +105,15 @@ export const sheetSrc = (agent: AgentId, sheet: string, detail: string, independ
 
 export interface Insight {
   id: string;
+  /** the territory it is about — the "View all" drawer filters on it */
+  territory: string;
   headline: string;
   body: string;
   origin: { agent: AgentId; when: string };
   connects: { label: string; target: string; agent: AgentId }[];
   confidence: Confidence;
+  /** computed from the data date's own records — the card marks it so new work is findable at a glance */
+  isNew?: boolean;
 }
 
 export const INSIGHTS_SUMMARY = C<{ short: string; text: string; confidence: Confidence }>("INSIGHTS_SUMMARY");
@@ -221,6 +225,10 @@ export interface Finding {
   at: string;
   insight: string;
   linkLabel?: string;
+  /** the territory of the insight or recommendation it corroborates (the Huddle sheet has none) */
+  territory: string;
+  /** same marking as Insights */
+  isNew?: boolean;
   confidence: Confidence;
 }
 
@@ -275,7 +283,9 @@ export const TERRITORY_HEALTH = C<Record<ViewerRole, HealthGrid>>("TERRITORY_HEA
 /** Set-level confidence for the Thermometer box itself. */
 export const THERMO_SET_CONFIDENCE = C<Confidence>("THERMO_SET_CONFIDENCE");
 
-export type RecRoute = "tracker" | "map" | "pitch";
+// "head" is the one destination outside the ASM's own territory workflow: it raises the
+// recommendation to the Sales Head as a decision rather than routing it to one of his agents.
+export type RecRoute = "tracker" | "map" | "pitch" | "head";
 
 /** Sales-head view: where each recommendation was routed by the ASM. */
 export const HEAD_REC_ROUTES = C<Record<string, RecRoute[]>>("HEAD_REC_ROUTES");
@@ -343,7 +353,8 @@ export interface AgentRun {
   agent: AgentId;
   steps: string[];
   result: string;
-  link: string;
+  /** omitted when the result lands somewhere this viewer can't open (an escalation to the Sales Head) */
+  link?: string;
 }
 
 /** System-suggested new actions, from any module, that could be added to Tracker. */
@@ -363,10 +374,15 @@ export interface SuggestedAction {
 
 export const SUGGESTED_ACTIONS = C<SuggestedAction[]>("SUGGESTED_ACTIONS");
 
-type ActionOutcome = { label: string; run: AgentRun } | { closed: string } | { agreed: string };
+/**
+ * What an item is waiting on. Most signals resolve without the ASM: an agent does the work
+ * (`done`), the ASM already settled it (`agreed`), or it closed itself (`closed`, optionally
+ * because SFA confirmed the outcome). Only the rest carry a suggested action to confirm.
+ */
+export type ItemAction = { label: string; run: AgentRun } | { done: string } | { agreed: string } | { closed: string; bySfa?: boolean };
 
-/** Suggested action per insight — or a closed action when it's already been handled. */
-export const INSIGHT_ACTIONS = C<Record<string, ActionOutcome>>("INSIGHT_ACTIONS");
+/** Suggested action per insight — or how it was settled (backend rules; see data_gaps). */
+export const INSIGHT_ACTIONS = C<Record<string, ItemAction>>("INSIGHT_ACTIONS");
 
 /** KPI detail views: month-by-month breakdowns (Apr–Sep). */
 export const ACTION_MONTHS = C<Record<ViewerRole, { month: string; opened: number; completed: number }[]>>("ACTION_MONTHS");
@@ -377,4 +393,24 @@ export const WEAKEST_BY_MONTH = C<Record<ViewerRole, { month: string; name: stri
 export const PLAN_RUN = C<AgentRun>("PLAN_RUN");
 
 /** What to do about each Huddle finding. */
-export const FINDING_ACTIONS = C<Record<string, ActionOutcome>>("FINDING_ACTIONS");
+export const FINDING_ACTIONS = C<Record<string, ItemAction>>("FINDING_ACTIONS");
+
+/** The walkthrough thread the cards narrow to while demo scope is on, chosen by the backend. */
+export const DEMO_SCENARIO_DATA = DOpt<{ id: string; name: string; short: string; insights: string[]; findings: string[]; leadInsights: string[] }>("cortexHome", "DEMO_SCENARIO", {
+  id: "none",
+  name: "No walkthrough thread",
+  short: "Thread",
+  insights: [],
+  findings: [],
+  leadInsights: [],
+});
+
+/** An item the ASM escalated to the Head of Sales, stored by the backend (POST /api/tracker/escalate). */
+export interface Escalation {
+  id: string;
+  note: string;
+  at: string;
+  to: string;
+}
+/** Open escalations by the item they came from (a recommendation or plan row id), as on page load. */
+export const ESCALATIONS = DOpt<Record<string, Escalation>>("cortexHome", "ESCALATIONS", {});

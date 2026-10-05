@@ -27,6 +27,8 @@ import { pct } from "./charts";
 import { useStatusMeta } from "./statusPalette";
 import { useHome } from "./HomeState";
 import { useCortexNav } from "./nav";
+import { FeedSheet } from "./feedSheet";
+import { DEMO_SCENARIO } from "@/data/demo";
 import { AgentChip, AgentIcon, ConnectChip, Panel, SectionTitle } from "./primitives";
 
 const BLUE = "#4f86f7";
@@ -96,72 +98,43 @@ export function InsightsSheet({
   /** Option B: suggested / agreed / closed per insight instead of the Actions menu */
   renderAction?: (id: string) => React.ReactNode;
 }) {
-  useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", k);
-    return () => document.removeEventListener("keydown", k);
-  }, [onClose]);
-  // Deep link: scroll to and highlight the insight that was clicked.
-  useEffect(() => {
-    if (!focusId) return;
-    const el = document.getElementById(`sheet-${focusId}`);
-    if (!el) return;
-    el.scrollIntoView({ block: "start" });
-    el.classList.remove("cx-flash");
-    void el.offsetWidth;
-    el.classList.add("cx-flash");
-  }, [focusId]);
   return (
-    <div className="fixed inset-0 z-[60] flex justify-end bg-black/50" onClick={onClose}>
-      <aside
-        role="dialog"
-        aria-label="All insights"
-        className="h-full w-full max-w-[min(860px,70vw)] overflow-y-auto border-l border-cx-strong bg-cx-bg px-9 py-8 max-md:max-w-full"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <h2 className="text-[20px] font-medium leading-none tracking-[-0.01em] text-cx-text">All insights</h2>
-            <AiTag />
+    <FeedSheet
+      title="All insights"
+      subtitle="Read across all four agents · 10:20"
+      items={INSIGHTS}
+      getId={(ins) => ins.id}
+      inScenario={(ins) => DEMO_SCENARIO.insights.includes(ins.id)}
+      facets={[
+        { key: "territory", label: "Territory", of: (ins) => ins.territory },
+        { key: "agent", label: "Raised by", of: (ins) => AGENTS[ins.origin.agent].name },
+      ]}
+      focusId={focusId}
+      onClose={onClose}
+      renderRow={(ins, i) => (
+        <>
+          <div className="flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2.5">
+              <span className="flex h-5 w-5 items-center justify-center rounded border border-cx-strong font-data text-[10.5px] text-cx-muted">{i + 1}</span>
+              <AgentChip agent={ins.origin.agent} suffix={ins.origin.when} />
+              <span className="text-[11.5px] text-cx-faint">{ins.territory}</span>
+            </span>
+            <span className="flex items-start gap-2.5">
+              <ConfidenceScore confidence={ins.confidence} align="right" />
+              {!renderAction && <ActionsMenu routeKey={`ins:${ins.id}`} pitchFor={insightPitchFor(ins.connects)} />}
+            </span>
           </div>
-          <button onClick={onClose} className="rounded-md p-1 text-cx-faint hover:bg-cx-hover hover:text-cx-text" aria-label="Close">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <p className="mt-1 text-[12px] text-cx-faint">Read across all four agents · 10:20</p>
-        <ol className="mt-6">
-          {INSIGHTS.map((ins, i) => (
-            <li
-              id={`sheet-${ins.id}`}
-              key={ins.id}
-              aria-current={focusId === ins.id ? "true" : undefined}
-              className={`scroll-mt-6 border-t px-3 py-7 first:border-t-0 ${
-                focusId === ins.id ? "rounded-lg border-transparent bg-[#2f6fed]/[0.09] shadow-[inset_3px_0_0_#4f86f7]" : "border-cx-line"
-              }`}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <span className="flex items-center gap-2.5">
-                  <span className="flex h-5 w-5 items-center justify-center rounded border border-cx-strong font-data text-[10.5px] text-cx-muted">{i + 1}</span>
-                  <AgentChip agent={ins.origin.agent} suffix={ins.origin.when} />
-                </span>
-                <span className="flex items-start gap-2.5">
-                  <ConfidenceScore confidence={ins.confidence} align="right" />
-                  {!renderAction && <ActionsMenu routeKey={`ins:${ins.id}`} pitchFor={insightPitchFor(ins.connects)} />}
-                </span>
-              </div>
-              <h3 className="mt-3 text-[15px] font-medium leading-snug text-cx-text">{ins.headline}</h3>
-              <p className="mt-2 text-[13px] leading-relaxed text-cx-muted">{ins.body}</p>
-              {renderAction && <div className="mt-3">{renderAction(ins.id)}</div>}
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {ins.connects.map((c) => (
-                  <ConnectChip key={c.target} {...c} />
-                ))}
-              </div>
-            </li>
-          ))}
-        </ol>
-      </aside>
-    </div>
+          <h3 className="mt-3 text-[15px] font-medium leading-snug text-cx-text">{ins.headline}</h3>
+          <p className="mt-2 text-[13px] leading-relaxed text-cx-muted">{ins.body}</p>
+          {renderAction && <div className="mt-3">{renderAction(ins.id)}</div>}
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {ins.connects.map((c) => (
+              <ConnectChip key={c.target} {...c} />
+            ))}
+          </div>
+        </>
+      )}
+    />
   );
 }
 
@@ -206,10 +179,13 @@ const RANGES = [
   { id: "month", label: "This month", maxHours: 24 * 31 },
 ] as const;
 
-const ROUTES: { id: RecRoute; label: string; done: string; color: string; icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }> }[] = [
+// Three of the ASM's own destinations, then the one that goes up. `up` keeps the fourth
+// below a rule in the menu: everything above it stays inside his own authority.
+const ROUTES: { id: RecRoute; label: string; done: string; color: string; up?: boolean; icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }> }[] = [
   { id: "tracker", label: "Add to Tracker", done: "In Tracker", color: "#2fa85c", icon: ListPlus },
   { id: "map", label: "Escalate to Market Action Plan", done: "In October plan", color: AGENTS.map.color, icon: CornerUpRight },
   { id: "pitch", label: "Send to Pitch", done: "In Pitch", color: AGENTS.pitch.color, icon: MessageSquareQuote },
+  { id: "head", label: "Escalate to Sales Head", done: `With ${LBL.headName}`, color: "#e0b43a", up: true, icon: ArrowUpRight },
 ];
 
 /** Single "Actions" trigger; hover or click opens the three destinations as a menu anchored right. */
@@ -271,14 +247,19 @@ function ActionsMenu({ routeKey, n, pitchFor }: { routeKey: string; n?: number; 
                   aria-checked={on}
                   onClick={() => {
                     toggleRoute(routeKey, x.id);
-                    toast(on ? `${tag} removed from ${x.done.replace("In ", "")}.` : `${tag}: ${x.id === "pitch" && pitchFor ? `prioritised for ${pitchFor}` : x.done.toLowerCase()}.`);
+                    toast(
+                      on
+                        ? `${tag} ${x.up ? `withdrawn from ${LBL.headName}'s queue.` : `removed from ${x.done.replace("In ", "")}.`}`
+                        : `${tag}: ${x.up ? `raised to ${LBL.headName} as a decision` : x.id === "pitch" && pitchFor ? `prioritised for ${pitchFor}` : x.done.toLowerCase()}.`
+                    );
                   }}
-                  className="flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left hover:bg-cx-hover"
+                  className={`flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left hover:bg-cx-hover ${x.up ? "mt-1 border-t border-cx-line pt-2.5" : ""}`}
                 >
                   <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: x.color }} />
                   <span className="min-w-0">
                     <span className="block text-[12.5px] text-cx-text">{on ? x.done : x.label}</span>
                     {x.id === "pitch" && pitchFor && <span className="block truncate text-[11px] text-cx-faint">for {pitchFor}</span>}
+                    {x.up && <span className="block truncate text-[11px] text-cx-faint">{on ? `Withdraw it from ${LBL.headName}'s queue` : "Raises it as a decision; it stays yours"}</span>}
                   </span>
                 </button>
               );
@@ -582,11 +563,12 @@ export function ConsoleAgentRow({ variant = "a" }: { variant?: "a" | "b" }) {
   const go = useCortexNav();
   // each card lands on its agent; Huddle has no agent page in this prototype yet
   const open = (id: string, name: string) => {
-    if (id === "thermometer") return go(role === "head" ? "thermometer-head" : "thermometer");
-    if (id === "map" && role === "asm") return go("map-plans");
-    if (id === "pitch" && role === "asm") return go("pitch");
+    const head = role === "head";
+    if (id === "thermometer") return go(head ? "thermometer-head" : "thermometer");
+    if (id === "map") return go(head ? "map-head" : "map-plans");
+    if (id === "pitch") return go(head ? "pitch-head" : "pitch");
     if (id === "huddle") return go("huddle");
-    toast(`${name} is the ASM's agent; you see it through the roll-ups.`);
+    toast(`The ${name} agent page isn't built yet.`);
   };
   const radius = "rounded-lg";
   // Both options: label beside the icon. Option B: grayscale icons (shape only) and "… agent" names.

@@ -21,6 +21,7 @@ import { PerformanceTab } from "./PerformanceTab";
 import { RecommendationsTab } from "./RecommendationsTab";
 import { ScorecardTab } from "./ScorecardTab";
 import { Tabs } from "./ui";
+import { SyncControl } from "./SyncControl";
 
 type Tab = "performance" | "scorecard" | "recommendations";
 const TABS: { id: Tab; label: string }[] = [
@@ -101,12 +102,17 @@ function Body({ persona }: { persona: ThermoPersona }) {
         <button onClick={() => go(persona === "head" ? "leadership" : "asm")} className="inline-flex items-center gap-1.5 text-[12px] text-cx-muted hover:text-cx-text">
           <ArrowLeft className="h-3.5 w-3.5" /> Home
         </button>
-        <h1 className="mt-3 flex items-center gap-3 text-[28px] font-medium leading-tight tracking-tight text-cx-text">
-          <AgentIcon agent="thermometer" size="lg" /> Thermometer
-        </h1>
-        <p className="mt-1.5 text-[12.5px] text-cx-faint">
-          {persona === "head" ? `All ${LBL.regions} · ${LBL.territories} · read-only` : `${LBL.asmRegion} · ${LBL.asmTerritories}`} · {FY_LABEL} · <span className="font-data">{SYNC_NOTE}</span>
-        </p>
+        <div className="mt-3 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+          <div className="min-w-0">
+            <h1 className="flex items-center gap-3 text-[28px] font-medium leading-tight tracking-tight text-cx-text">
+              <AgentIcon agent="thermometer" size="lg" /> Thermometer
+            </h1>
+            <p className="mt-1.5 text-[12.5px] text-cx-faint">
+              {persona === "head" ? `All ${LBL.regions} · ${LBL.territories} · read-only` : `${LBL.asmRegion} · ${LBL.asmTerritories}`} · {FY_LABEL} · <span className="font-data">{SYNC_NOTE}</span>
+            </p>
+          </div>
+          <SyncControl />
+        </div>
         <div className="mt-5">
           <Tabs value={tab} options={TABS} onChange={setTab} label="Thermometer" />
         </div>

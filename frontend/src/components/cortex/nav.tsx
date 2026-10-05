@@ -17,8 +17,11 @@ export type CortexPage =
   | "thermometer-head"
   | "map-studio"
   | "map-plans"
+  | "map-head"
   | "pitch"
+  | "pitch-head"
   | "pitch-detail"
+  | "pitch-detail-head"
   | "pitch-adhoc"
   | "tracker"
   | "tracker-head"
@@ -39,8 +42,11 @@ export const PAGE_HREF: Record<CortexPage, string> = {
   "thermometer-head": "/leadership/thermometer",
   "map-studio": "/map/studio",
   "map-plans": "/map",
+  "map-head": "/leadership/map",
   pitch: "/pitch",
+  "pitch-head": "/leadership/pitch",
   "pitch-detail": "/pitch/detail",
+  "pitch-detail-head": "/leadership/pitch/detail",
   "pitch-adhoc": "/pitch/adhoc",
   tracker: "/tracker",
   "tracker-head": "/leadership/tracker",
@@ -55,10 +61,9 @@ export const PAGE_HREF: Record<CortexPage, string> = {
 /** Where a result link ("View in Pitch", "View plan") leads, when that page is built. */
 export function linkPage(link: string, role: "asm" | "head" = "asm"): CortexPage | null {
   if (/tracker|ticket/i.test(link)) return role === "head" ? "tracker-head" : "tracker";
-  // MAP and Pitch are the ASM's pages; on the Head of Sales view these stay previews
-  if (role === "head") return null;
-  if (/pitch/i.test(link)) return "pitch";
-  if (/plan/i.test(link)) return "map-plans";
+  // MAP and Pitch have a Head of Sales view too: the same pages, read-only, comments only
+  if (/pitch/i.test(link)) return role === "head" ? "pitch-head" : "pitch";
+  if (/plan/i.test(link)) return role === "head" ? "map-head" : "map-plans";
   return null;
 }
 

@@ -9,6 +9,8 @@ const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 export const LBL = {
   asmName: VIEWER.asm.name,
+  /** the Head of Sales (the workbook's RSM) — where an escalation lands */
+  headName: VIEWER.head.name,
   asmRegion: REGIONS.find((r) => r.asm === VIEWER.asm.name)?.name ?? REGIONS[0]?.name ?? "",
   asmTerrCount: TERRITORIES.length,
   asmTerritories: `${TERRITORIES.length} ${TERRITORIES.length === 1 ? "territory" : "territories"}`,

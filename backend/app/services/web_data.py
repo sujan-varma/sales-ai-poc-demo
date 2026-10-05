@@ -54,6 +54,14 @@ DATA_GAPS = [
     {"area": "Project customers, dealers", "detail": "Outlets are retailers (Cement-Steel Dealers are shown as dealers); there are no project customers. Distributor sales are the secondary sales of their retailers."},
     {"area": "Weekly score history", "detail": "No history; Scorecard trends are flat at today's score."},
     {"area": "Configuration settings and history", "detail": "Platform settings and thresholds are app configuration, not workbook data."},
+    {"area": "What each person has already seen ('New')",
+     "detail": "No read history. 'New' marks items computed from the data date's own records: September re-projected on the 20 Sep MTD, a beat crossing the 30-day no-visit line on 20 Sep, a short supply or visit dated 20 Sep, and the Huddle findings that corroborate them."},
+    {"area": "How an insight was settled",
+     "detail": "No resolution records. An insight reads Done when its gap is already in the October draft, Closed by SFA when the SO's last visit is after the short supply, and Closed when it rests on one sheet only (score under 70). A Huddle finding owned by another department is routed there."},
+    {"area": "Huddle territory and date",
+     "detail": "The Huddle sheet has neither. A finding takes its territory from the insight or recommendation it corroborates."},
+    {"area": "Sales Executives across regions",
+     "detail": "Ten sales officers serve more than one ASM in the workbook; on the org-wide pages they appear under each ASM, and a pitch carries the ASM and region it was built for."},
 ]
 
 
@@ -90,6 +98,14 @@ def initials(name: str) -> str:
 
 def first(name: str) -> str:
     return str(name).split()[0]
+
+
+def _dm(d: Optional[dt.date]) -> str:
+    return f"{d.day} {MON[d.month - 1]}" if d else "—"
+
+
+def _slug_id(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(s).lower()).strip("-")
 
 
 DATA_LABEL = f"{AS_OF.day} {MON[AS_OF.month - 1]}"
@@ -561,12 +577,39 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
         insights.append({"id": "ins-competitor", "headline": rp["title"], "body": rp["why"] + " This is a market-size estimate, not invoice prices, so it supports a scheme push rather than a price change.",
                          "origin": {"agent": "huddle", "when": "20 Sep"}, "connects": [{"label": "Recommendation #" + str(rp["n"]), "target": rp["id"], "agent": "thermometer"}],
                          "confidence": rp["confidence"]})
-    INSIGHTS_SUMMARY = {
-        "short": f"September is at {pct(my_act, my_mtd) or 0:.0f}% of the phased target" + (f", {rc['territory']} has the largest overdue" if rc else "") + (f" and {rcv['impactLabel']} has no recent visit." if rcv else "."),
-        "text": " ".join(i["headline"] for i in insights),
-        "confidence": conf(round(sum(i["confidence"]["score"] for i in insights) / max(1, len(insights))), "Synthesised from the insights below, all computed from the workbook.",
-                           [src("thermometer", f"{len(recs)} open signals", "From credit, sales, logistics and visit sheets")]),
-    }
+    # the stock-out: the largest short-supplied order in the Stock recommendation's territory, closed when the SO's last
+    # recorded visit to that retailer falls on or after the short supply
+    rs = rec_by.get("Stock")
+    stock_close = None
+    if rs:
+        shorts_t = [f for f in my if f["terr"] == rs["territory"] and f["short_sku"] and f["order_date"]]
+        top_s = max(shorts_t, key=lambda f: f["short_qty"] * price_of.get(f["short_sku"], 0.0)) if shorts_t else None
+        if top_s:
+            seen = top_s["visit"] and top_s["visit"] >= top_s["order_date"]
+            if seen:
+                stock_close = f"Closed by SFA · {top_s['so']} visited {top_s['name']} on {_dm(top_s['visit'])}, after the short supply on {_dm(top_s['order_date'])}"
+            insights.append({"id": "ins-stockout", "territory": rs["territory"],
+                             "headline": (f"The {top_s['short_sku']} short supply at {top_s['name']} closed on the next visit." if seen
+                                          else f"{top_s['name']} is still short of {int(top_s['short_qty'])} units of {top_s['short_sku']}."),
+                             "body": f"The distributor short-supplied order {top_s['order_id']} on {_dm(top_s['order_date'])}, the largest of {len(shorts_t)} short orders in {rs['territory']}. "
+                                     + (f"{top_s['so']}'s visit on {_dm(top_s['visit'])} is on record after it, so nothing is open on this outlet." if seen
+                                        else "No SO visit is on record since then; Pitch can raise the outlet on the next beat."),
+                             "origin": {"agent": "thermometer", "when": _dm(top_s["order_date"])},
+                             "connects": [{"label": "Recommendation #" + str(rs["n"]), "target": rs["id"], "agent": "thermometer"}],
+                             "confidence": conf(score_from(2), "The short supply and the visit are both recorded per retailer in the workbook.",
+                                                [src("thermometer", "15. Logistics fulfilment", f"Order {top_s['order_id']}, {int(top_s['short_qty'])} units short"),
+                                                 src("pitch", "4. Retailer_Master", f"SO last visit {_dm(top_s['visit'])}" if top_s["visit"] else "No SO visit on record")]),
+                             "_new": AS_OF in (top_s["order_date"], top_s["visit"])})
+    # the territory each insight is about, and whether it came from the data date's own records ("New"): the workbook has
+    # no record of what the ASM has already seen, so New = Sep MTD re-projected on the data date, a beat crossing the
+    # 30-day line on the data date, or a short supply / visit dated on it
+    terr_of = {"ins-collection": rc and rc["territory"], "ins-coverage": rcv and rcv["territory"], "ins-pacing": rr["territory"] if rr else my_region,
+               "ins-competitor": rp and rp["territory"]}
+    crossed = rcv and any(f["visit"] and (AS_OF - f["visit"]).days == 31 for f in org.by_terr[rcv["territory"]] if f["asm"] == A)
+    new_of = {"ins-pacing": True, "ins-coverage": bool(crossed)}
+    for ins in insights:
+        ins.setdefault("territory", terr_of.get(ins["id"]) or my_region)
+        ins["isNew"] = bool(ins.pop("_new", new_of.get(ins["id"], False)))
 
     # ---- findings (Huddle sheet verbatims)
     pr = {"High": 0, "Medium": 1, "Low": 2}
@@ -583,16 +626,27 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
             return rec_by["Stock"]["id"], f"Recommendation #{rec_by['Stock']['n']}"
         return "ins-pacing", None
 
+    ins_by = {i["id"]: i for i in insights}
+    rec_ids = {r["id"]: r for r in recs}
     for i, h in enumerate(hud[:4]):
         fid = f"find-{i + 1}"
         ins, lbl = link_for(h["Theme"])
         n_act = int(_n(h.get("# of action items")))
+        dept = str(h.get("Owner department") or "Sales")
+        # the Huddle sheet has no territory or date: a finding takes both from the insight or recommendation it corroborates
+        linked = ins_by.get(ins) or rec_ids.get(ins) or {}
         findings.append({"id": fid, "theme": h["Theme"], "quote": str(h.get("Convo verbatim") or "").strip('"“”'), "speaker": h.get("Owner department designation") or "Sales",
-                         "speakerRole": f"{h.get('Owner department') or 'Sales'} · urgency {h.get('Urgency')}", "session": f"{h.get('Huddle')} huddle", "when": "20 Sep",
+                         "speakerRole": f"{dept} · urgency {h.get('Urgency')}", "session": f"{h.get('Huddle')} huddle", "when": "20 Sep",
                          "at": "", "insight": ins, **({"linkLabel": lbl} if lbl else {}),
+                         "territory": linked.get("territory") or my_region, "isNew": bool(ins_by.get(ins, {}).get("isNew")),
                          "confidence": conf(score_from(1, 62), "Verbatim from the Huddle sheet; not cross-checked against sales data.", [src("huddle", "Huddle sheet", f"{n_act} action items, urgency {h.get('Urgency')}")])})
-        finding_actions[fid] = {"label": "Send to Tracker", "run": {"agent": "huddle", "steps": ["reading the huddle theme", "creating the actions"],
-                                                                     "result": f"Added to Tracker — {n_act} action items, owner: {h.get('Owner department designation') or 'Sales'}", "link": "View in Tracker"}}
+        if "sales" in dept.lower():
+            # the ASM's own call: Huddle suggests the Tracker actions, the ASM confirms
+            finding_actions[fid] = {"label": "Send to Tracker", "run": {"agent": "huddle", "steps": ["reading the huddle theme", "creating the actions"],
+                                                                         "result": f"Added to Tracker — {n_act} action items, owner: {h.get('Owner department designation') or 'Sales'}", "link": "View in Tracker"}}
+        else:
+            # owned by another department in the sheet: Huddle routes the items there, nothing waits on the ASM
+            finding_actions[fid] = {"done": f"Done · Huddle routed {n_act} action items to {dept} ({h.get('Owner department designation') or dept})"}
 
     # ---- ask answers
     worst_t = min(my_terrs, key=lambda t: pct(_sum(org.by_terr[t], "sep"), _sum(org.by_terr[t], "sep_mtd_t")) or 0)
@@ -604,7 +658,7 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
         {"q": "Which territory is furthest behind September plan?",
          "answer": f"{worst_t}, at {pct(_sum(wt, 'sep'), _sum(wt, 'sep_mtd_t')) or 0:.0f}% of its phased Sep target ({inr(_sum(wt, 'sep'))} of {inr(_sum(wt, 'sep_mtd_t'))} to the 20th). {top_cat(wt)[0]} is the largest gap.",
          "links": [{"label": "Market Action Plan", "target": "map-panel", "agent": "map"}] + ([{"label": f"Recommendation #{rr['n']}", "target": rr["id"], "agent": "thermometer"}] if rr else []),
-         "confidence": insights[-2]["confidence"] if len(insights) > 1 else THERMO_SET_CONFIDENCE},
+         "confidence": ins_by["ins-pacing"]["confidence"]},
         {"q": "What should go into October's plan?", "answer": "Candidates from the open recommendations: " + "; ".join(r["title"] for r in recs[:3]) + ". Nothing goes into the plan until you accept it.",
          "links": [{"label": "Thermometer", "target": "thermo-panel", "agent": "thermometer"}, {"label": "Market Action Plan", "target": "map-panel", "agent": "map"}],
          "confidence": THERMO_SET_CONFIDENCE},
@@ -834,6 +888,16 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
         hh = hud[0]
         LEAD_INSIGHTS.append({"id": "li-3", "headline": f"Huddle: {hh['Theme']}", "region": "All regions", "asms": org.asms[:2], "from": "Huddle themes", "agent": "huddle", "when": "09:10",
                               "confidence": conf(score_from(1, 55), "A single huddle theme; not cross-checked.", [src("huddle", "Huddle sheet", f"Urgency {hh.get('Urgency')}")])})
+    # the viewing ASM's own thread, where it reaches the Head of Sales: his region's collections
+    od_mine = [f for f in my if f["overdue"] > 0]
+    if od_mine:
+        t_od = Counter({t: sum(f["overdue"] for f in od_mine if f["terr"] == t) for t in my_terrs}).most_common(1)[0][0]
+        fs_od = [f for f in od_mine if f["terr"] == t_od]
+        LEAD_INSIGHTS.append({"id": "li-4", "headline": f"{my_region}: {inr(_sum(fs_od, 'overdue'))} is overdue in {t_od} across {len(fs_od)} retailers, "
+                                                        f"{sum(1 for f in fs_od if f['risk'] == 'High')} rated high risk. {A} is holding the follow-up; the oldest is {max(f['ageing'] for f in fs_od)} days.",
+                              "region": my_region, "asms": [A], "from": f"Thermometer, {my_region}", "agent": "thermometer", "when": "08:00",
+                              "confidence": conf(score_from(2), "Overdue and ageing from the credit sheet; the risk rating is the workbook's own.",
+                                                 [src("thermometer", "5. Retailer Credit", f"Overdue and ageing, {t_od}"), src("thermometer", "4. Retailer_Master", "Risk rating per retailer")])})
     LEAD_SUMMARY = " ".join(li["headline"] for li in LEAD_INSIGHTS)
 
     PLAN_REVIEWS, SCORECARD = [], []
@@ -879,13 +943,44 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
                           "retailerId": f["rid"], "kind": s["kind"], "suggestedOwner": f["so"], "suggestedOwnerId": f["so_id"],
                           "why": f"From the workbook: {s['signal'].lower()} signal for {f['name']}", "confidence": recs[0]["confidence"] if recs else THERMO_SET_CONFIDENCE,
                           "run": {"agent": s["agent"], "steps": ["reading the signal", "creating the action"], "result": f"Added to your Tracker — {f['so']} suggested as owner", "link": "View in Tracker"}})
-    INSIGHT_ACTIONS = {}
-    for ins in insights:
-        INSIGHT_ACTIONS[ins["id"]] = {"label": "Push to Pitch engine" if ins["id"] != "ins-pacing" else "Push to Market Action Plan",
-                                      "run": {"agent": "pitch" if ins["id"] != "ins-pacing" else "map", "steps": ["reading the insight", "updating priorities"],
-                                              "result": f"Updated the plan for {ins['headline'].split(':')[0][:40]}", "link": "View"}}
     REC_SUGGESTED = {r["id"]: {"Collection": "tracker", "Coverage": "pitch", "Revenue": "map", "Stock": "tracker", "Pricing": "pitch"}[r["signal"]] for r in recs}
     REC_SUGGESTED.update({"tr-prod": "pitch", "tr-degrow": "tracker", "tr-dealers": "tracker", "tr-nontrade": "map", "tr-bp": "pitch"})
+    plan = web_plan.build(wb, org, {"A": A, "sig_rows": sig_rows, "recs": recs, "rec_route": REC_SUGGESTED})
+
+    # What each insight is waiting on. Most settle without the ASM: an agent already did the work (done), SFA closed
+    # it (closed, bySfa), or it is parked on thin evidence (closed). The rest carry a suggested action to confirm.
+    INSIGHT_ACTIONS = {}
+    draft_for = next((d for d in plan["map"]["OCT_DRAFT"] if rr and d["territory"] == rr["territory"]), None)
+    for ins in insights:
+        iid = ins["id"]
+        if iid == "ins-pacing" and draft_for:
+            INSIGHT_ACTIONS[iid] = {"done": f"Done · Market Action Plan put {draft_for['title']} into the October draft (₹{draft_for['estL']:.1f} L still open)"}
+        elif iid == "ins-stockout" and stock_close:
+            INSIGHT_ACTIONS[iid] = {"closed": stock_close, "bySfa": True}
+        elif iid == "ins-competitor" and ins["confidence"]["score"] < 70:
+            INSIGHT_ACTIONS[iid] = {"closed": f"Closed · parked until a second source confirms it; one sheet only, scored {ins['confidence']['score']}"}
+        else:
+            INSIGHT_ACTIONS[iid] = {"label": "Push to Pitch engine" if iid != "ins-pacing" else "Push to Market Action Plan",
+                                    "run": {"agent": "pitch" if iid != "ins-pacing" else "map", "steps": ["reading the insight", "updating priorities"],
+                                            "result": f"Pitch priorities updated for {ins['territory']}" if iid != "ins-pacing" else f"Added to the October draft for {ins['territory']}",
+                                            "link": "View in Pitch" if iid != "ins-pacing" else "View plan"}}
+    settled_note = lambda a: a.get("done") or a.get("agreed") or a.get("closed")
+    waiting = [i for i in insights if "label" in INSIGHT_ACTIONS[i["id"]]]
+    settled = [i for i in insights if "label" not in INSIGHT_ACTIONS[i["id"]]]
+    INSIGHTS_SUMMARY = {
+        "short": ("No signals on the current data date." if not insights else
+                  (f"{len(settled)} of {len(insights)} signals settled without you" if settled else f"All {len(insights)} signals are open")
+                  + (f"; {', '.join(i['territory'] for i in waiting[:2])} {'is' if len(waiting[:2]) == 1 else 'are'} still waiting on you." if waiting else "; nothing is waiting on you.")),
+        "text": " ".join([f"Waiting on you: {i['headline']}" for i in waiting]
+                         + [f"Already settled in {i['territory']}: {settled_note(INSIGHT_ACTIONS[i['id']]).split(' · ', 1)[-1]}." for i in settled]),
+        "confidence": conf(round(sum(i["confidence"]["score"] for i in insights) / max(1, len(insights))), "Synthesised from the insights below, all computed from the workbook.",
+                           [src("thermometer", f"{len(recs)} open signals", "From credit, sales, logistics and visit sheets")]),
+    }
+    # the walkthrough thread: what is waiting on the ASM or new, and the Huddle findings that corroborate it
+    scen = [i["id"] for i in insights if "label" in INSIGHT_ACTIONS[i["id"]] or i["isNew"]][:3]
+    scen_links = set(scen) | {c["target"] for i in insights if i["id"] in scen for c in i["connects"]}
+    DEMO_SCENARIO = {"id": f"{_slug_id(my_region)}-sep-oct", "name": f"{my_region} · September close, October plan", "short": f"{first(A)}'s thread",
+                     "insights": scen, "findings": [f["id"] for f in findings if f["insight"] in scen_links], "leadInsights": ["li-4"]}
     ACTION_TRACES = {}
     for r in recs:
         route = REC_SUGGESTED[r["id"]]
@@ -894,13 +989,16 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
                                                 {"agent": "pitch", "verdict": f"{r['pitchFor']}", "chosen": route == "pitch"}],
                                   "why": f"Routed to {ROUTE_LABEL[route]} because it's a {r['signal'].lower()} signal.", "outcome": f"{ROUTE_LABEL[route]} — {r['territory']}", "link": "View"}
     for ins in insights:
-        ACTION_TRACES[ins["id"]] = {"input": {"label": ins["confidence"]["sources"][0]["title"], "detail": ins["headline"][:80], "at": "08:00"},
-                                    "evaluated": [{"agent": ins["origin"]["agent"], "verdict": ins["body"][:120], "chosen": True}], "why": "Computed from the workbook on the 20 Sep sync.",
-                                    "outcome": INSIGHT_ACTIONS[ins["id"]]["run"]["result"], "link": "View"}
+        ACTION_TRACES[ins["id"]] = {"input": {"label": ins["confidence"]["sources"][0]["title"], "detail": ins["headline"], "at": "08:00"},
+                                    "evaluated": [{"agent": ins["origin"]["agent"], "verdict": ins["body"].split(". ")[0].rstrip(".") + ".", "chosen": True}], "why": "Computed from the workbook on the 20 Sep sync.",
+                                    "outcome": INSIGHT_ACTIONS[ins["id"]]["run"]["result"] if "run" in INSIGHT_ACTIONS[ins["id"]] else settled_note(INSIGHT_ACTIONS[ins["id"]]), "link": "View"}
     for fd in findings:
-        ACTION_TRACES[fd["id"]] = {"input": {"label": fd["session"], "detail": fd["theme"][:80], "at": "09:10"},
+        fa = finding_actions[fd["id"]]
+        ACTION_TRACES[fd["id"]] = {"input": {"label": fd["session"], "detail": fd["theme"], "at": "09:10"},
                                    "evaluated": [{"agent": "huddle", "verdict": f"decoded {fd['confidence']['sources'][0]['detail']}", "chosen": True}],
-                                   "why": "Huddle action items need an owner and a date, so they go to Tracker.", "outcome": finding_actions[fd["id"]]["run"]["result"], "link": "View in Tracker"}
+                                   "why": "Huddle action items need an owner and a date, so they go to Tracker." if "run" in fa
+                                          else "The Huddle sheet names another department as owner, so Huddle sent the items there.",
+                                   "outcome": fa["run"]["result"] if "run" in fa else settled_note(fa), "link": "View in Tracker"}
 
     # ---- viewer, labels
     head_terrs = sum(len(v) for v in org.terr_by_asm.values())
@@ -935,7 +1033,16 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
     LEVERS = thermo_levers(org, cps, tiers)
     BDES = thermo_bdes(org)
 
-    plan = web_plan.build(wb, org, {"A": A, "sig_rows": sig_rows, "recs": recs, "rec_route": REC_SUGGESTED})
+    # every ASM's plans, roster and pitches, for the Head of Sales's read-only MAP and Pitch pages
+    months_by_asm = {a: plan_months(org.by_asm[a], lambda m, e, a_: f"{pct(a_, e) or 0:.0f}% of target") for a in org.asms}
+    ORG = web_plan.build_org(wb, org, plan, A, months_by_asm)
+
+    # what Thermometer's Sync control reads, in order: the workbook sheets behind it, then the agents feeding it
+    SYNC_FEEDS = [{"label": label, "doing": f"reading {sheet} · {len(wb.sheets[sheet].rows):,} rows"}
+                  for label, sheet in (("Retailers", MASTER), ("Sales", ACT_V), ("Targets", TGT_V), ("Credit", CREDIT), ("Logistics", LOGI)) if sheet in wb.sheets]
+    SYNC_FEEDS += [{"label": "Huddle", "doing": f"taking {len(org.huddle)} huddle themes", "agent": "huddle"},
+                   {"label": "Pitch", "doing": "taking SO visit dates", "agent": "pitch"},
+                   {"label": "Market Action Plan", "doing": "checking plan actuals", "agent": "map"}]
 
     return {
         "map": plan["map"], "pitch": plan["pitch"], "tracker": plan["tracker"],
@@ -962,8 +1069,11 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
             "LEVER_RAISED": LEVER_RAISED, "SUGGESTED_ACTIONS": suggested, "INSIGHT_ACTIONS": INSIGHT_ACTIONS,
             "ACTION_MONTHS": {"asm": action_months(my), "head": action_months(allf)}, "WEAKEST_BY_MONTH": WEAKEST,
             "PLAN_RUN": {"agent": "map", "steps": ["reading September to the 20th", "weighing open recommendations", "drafting initiatives"], "result": f"October draft ready — {min(3, len(recs))} initiatives across {len(my_terrs)} territories", "link": "View draft"},
-            "FINDING_ACTIONS": finding_actions,
+            "FINDING_ACTIONS": finding_actions, "DEMO_SCENARIO": DEMO_SCENARIO,
+            # open escalations by source id (per request, overlay_escalations)
+            "ESCALATIONS": {},
         },
+        "org": ORG,
         "leadership": {
             "REGIONS": regions, "ORG_HEALTH": {"rowLabel": "Region", "columns": cols, "rows": org_rows}, "ORG_TERRITORY_ROWS": terr_rows,
             "ORG_WEAKEST_BY_MONTH": ORG_WEAKEST, "DECISIONS": decisions, "DECISION_TRACES": dec_traces, "RANGES": RANGES, "RANGE_DATA": RANGE_DATA,
@@ -977,7 +1087,7 @@ def _build(wb: Workbook, asm_name: str) -> dict[str, Any]:
         "thermometer": {
             "AS_OF": {"day": AS_OF.day, "days": MONTH_DAYS, "label": "20 Sep 2026"}, "SYNC_NOTE": "From the Excel workbook · data to 20 Sep 2026",
             "CATEGORY_PACKS": CATEGORY_PACKS, "CPS": cps, "BDES": BDES, "LEADS": [], "LEVERS": LEVERS, "SCHEME_REWARDS": SCHEME_REWARDS,
-            "ASM_NAME": A,
+            "ASM_NAME": A, "SYNC_FEEDS": SYNC_FEEDS,
             # Huddle sheet themes about competitors and partners switching, quoted as evidence by the recommendations
             "HUDDLE_SIGNALS": [{"n": int(_n(h.get("#"))), "theme": str(h["Theme"]).strip(), "urgency": h.get("Urgency"), "session": h.get("Huddle"),
                                 "switching": bool(re.search(r"switch", str(h["Theme"]), re.I))}
@@ -1086,4 +1196,44 @@ def thermo_bdes(org: _Org) -> list[dict[str, Any]]:
         out.append({"code": f"BDE-{n}", "role": "BDE", "name": r["pos"], "territory": terr, "monthlyTarget": 0, "months": [0] * 12,
                     "leadTgt": int(nums[0]) if len(nums) > 1 else 0, "leadAch": int(nums[1]) if len(nums) > 1 else 0, "oppValue": 0,
                     "converted": int(nums[4]) if len(nums) > 4 else 0})
+    return out
+
+
+# ---------------------------------------------------------------- per-request: escalations to the Head of Sales
+
+def overlay_escalations(data: dict[str, Any]) -> dict[str, Any]:
+    """Apply the ASMs' open escalations (tracker.json) without touching the cached payload: each becomes a decision in
+    the Head of Sales's Needs your decision, and the viewing ASM's plan rows and recommendations carry their own."""
+    from app.services import tracker as tracker_store
+
+    open_ = tracker_store.list_escalations()
+    if not open_:
+        return data
+    ld, ch, mp = data["leadership"], data["cortexHome"], data["map"]
+    A = mp["LABELS"]["asm"]
+    region_of = {r["asm"]: r["name"] for r in ld["REGIONS"]}
+    head = ch["VIEWER"]["head"]["name"]
+    decisions = list(ld["DECISIONS"])
+    for e in sorted(open_, key=lambda e: e["created"]):
+        n = len(decisions) + 1
+        what = "plan row" if e["kind"] == "plan" else "recommendation"
+        decisions.append({
+            "id": f"esc-{e['id']}", "n": n, "question": e["note"],
+            "context": f"{e['by']} escalated the {what} “{e['title']}”" + (f" in {e['territory']}" if e.get("territory") else "") + ".",
+            "region": region_of.get(e["by"], ""), "territory": e.get("territory") or "", "asm": e["by"],
+            "raised": f"{web_plan._when(e['created'])} · {e['id']} · escalated by {e['by']}",
+            "stake": f"{e.get('priority') or 'No'} priority {what}", "recommendation": f"{e['by']} asks you to approve it; Sales AI adds no suggestion of its own.",
+            "thresholdId": "plan", "thresholdLabel": f"Escalated by {e['by']}",
+            # the suggested answer is the ASM's own ask, not an AI recommendation
+            "options": [{"id": "a", "label": f"Approve, as {e['by']} asks", "recommended": True, "outcome": f"{e['by']} goes ahead"},
+                        {"id": "b", "label": "Decline", "outcome": f"{e['by']} keeps it within the current plan"}],
+            "run": {"agent": "map", "steps": ["recording your answer", f"sending it to {e['by']}"], "result": f"Answer sent to {e['by']} on {e['id']}", "link": "View in Tracker"},
+            "confidence": conf(score_from(1), f"Raised by {e['by']}; the evidence is the {what}'s own workbook source.",
+                               [src("map" if e["kind"] == "plan" else "thermometer", e["title"], e.get("territory") or "")]),
+        })
+    mine = {e["source_id"]: {"id": e["id"], "note": e["note"], "at": web_plan._when(e["created"]), "to": head} for e in open_ if e["by"] == A}
+    out = dict(data)
+    out["leadership"] = {**ld, "DECISIONS": decisions}
+    out["cortexHome"] = {**ch, "ESCALATIONS": mine}
+    out["map"] = {**mp, "SEP_INITIATIVES": [{**i, "escalation": mine[i["id"]]} if i["id"] in mine else i for i in mp["SEP_INITIATIVES"]]}
     return out

@@ -14,6 +14,8 @@ import { AgentRunChip } from "../agentRun";
 import { useHome } from "../HomeState";
 import { AgentIcon, Avatar, StatusBadge } from "../primitives";
 import { card, CardHeader, Dropdown } from "../kit";
+import { DemoScopeChip, FeedEmpty, FeedSheet } from "../feedSheet";
+import { DEMO_SCENARIO, useDemoScope } from "@/data/demo";
 import { CommentBox, useLeadership } from "./common";
 import { useCortexNav } from "../nav";
 
@@ -109,11 +111,12 @@ export function ThermoScorecard({ compact = false, max = 7 }: { compact?: boolea
 // Insights — the ASM card, filtered to what waits on leadership
 // ---------------------------------------------------------------------------
 
-function InsightItem({ ins }: { ins: LeadInsight }) {
+function InsightItem({ ins, bare = false }: { ins: LeadInsight; bare?: boolean }) {
   const [assigned, setAssigned] = useState<{ asm: string; key: number } | null>(null);
   const others = REGIONS.map((r) => r.asm).filter((a) => !ins.asms.includes(a));
+  const Row = bare ? "div" : "li";
   return (
-    <li className="border-t border-cx-line py-4">
+    <Row className={bare ? "" : "border-t border-cx-line py-4"}>
       <div className="flex items-start gap-2.5">
         <AgentIcon agent={ins.agent} size="sm" />
         <div className="min-w-0 flex-1">
@@ -149,27 +152,61 @@ function InsightItem({ ins }: { ins: LeadInsight }) {
           )}
         </div>
       </div>
-    </li>
+    </Row>
   );
 }
 
 export function LeadershipInsights() {
   const [more, setMore] = useState(false);
+  const [sheet, setSheet] = useState<string | null | false>(false);
+  // a walkthrough stays on its own thread; the rest is under View all
+  const [scope] = useDemoScope();
+  const rows = scope ? LEAD_INSIGHTS.filter((i) => DEMO_SCENARIO.leadInsights.includes(i.id)) : LEAD_INSIGHTS;
   return (
     <section id="insights" aria-labelledby="ins-title" className={`${card} flex h-full flex-col p-5`}>
-      <CardHeader id="ins-title" icon={<Sparkles className="h-4 w-4" />} title="Insights" badge={<AiTag />} right={<span className="text-[11.5px] text-cx-faint">Waiting on you · {LEAD_INSIGHTS.length}</span>} />
+      <CardHeader
+        id="ins-title"
+        icon={<Sparkles className="h-4 w-4" />}
+        title="Insights"
+        badge={<AiTag />}
+        right={
+          <span className="flex items-center gap-2">
+            <DemoScopeChip shown={rows.length} total={LEAD_INSIGHTS.length} />
+            <button onClick={() => setSheet(null)} className="inline-flex items-center gap-1 whitespace-nowrap text-[12px] text-cx-muted hover:text-cx-text">
+              View all <ChevronRight className="h-3 w-3" />
+            </button>
+          </span>
+        }
+      />
       <p className={`mt-3 text-[13.5px] leading-relaxed text-cx-text ${more ? "" : "line-clamp-2"}`}>{LEAD_INSIGHTS_SUMMARY}</p>
       <button onClick={() => setMore((m) => !m)} className="mt-0.5 self-start text-[11.5px] text-cx-muted hover:text-cx-text">
         {more ? "View less" : "View more"}
       </button>
+      {rows.length === 0 && <FeedEmpty total={LEAD_INSIGHTS.length} what="insights waiting on you" source="GET /api/web/sections/leadership · LEAD_INSIGHTS" />}
       <ul className="mt-3">
-        {LEAD_INSIGHTS.map((ins) => (
+        {rows.map((ins) => (
           <InsightItem key={ins.id} ins={ins} />
         ))}
       </ul>
       <p className="mt-auto flex items-center gap-2 border-t border-cx-line pt-3 text-[11.5px] text-cx-faint">
         <UserPlus className="h-3.5 w-3.5" /> You assign to an ASM; they pass it on to their sales officers.
       </p>
+      {sheet !== false && (
+        <FeedSheet
+          title="All insights waiting on you"
+          subtitle={`Across ${LBL.regions} · ${LEAD_INSIGHTS.length} open · what the ASMs already closed isn't shown`}
+          items={LEAD_INSIGHTS}
+          getId={(ins) => ins.id}
+          inScenario={(ins) => DEMO_SCENARIO.leadInsights.includes(ins.id)}
+          facets={[
+            { key: "region", label: "Region", of: (ins) => ins.region },
+            { key: "agent", label: "Raised by", of: (ins) => AGENTS[ins.agent].name },
+          ]}
+          focusId={sheet}
+          onClose={() => setSheet(false)}
+          renderRow={(ins) => <InsightItem ins={ins} bare />}
+        />
+      )}
     </section>
   );
 }

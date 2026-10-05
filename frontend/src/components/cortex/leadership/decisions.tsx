@@ -6,13 +6,13 @@
 // Decision Thresholds (Configuration) arrive here.
 
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronDown, ChevronRight, CornerUpRight, ListChecks, MessageSquareQuote, MessageSquareText, MoreHorizontal, Scale, SlidersHorizontal, Sparkles, Undo2, Workflow } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronRight, CornerUpRight, ListChecks, MessageSquareQuote, MessageSquareText, MoreHorizontal, Scale, SlidersHorizontal, Sparkles, Undo2 } from "lucide-react";
 import { AgentRun, AGENTS, PRIMARY_BLUE_SOFT, RecRoute, STATUS_META } from "@/data/cortexHome";
 import { DECISIONS, DECISION_TRACES, Decision, TODAY_ACTIVITY } from "@/data/leadership";
 import { ROUTE_DONE_LABEL } from "@/data/actionTraces";
 import { AiTag, ConfidenceScore } from "../ai";
 import { AgentRunChip } from "../agentRun";
-import { ActionTraceSteps } from "../actionTrace";
+import { TraceTrigger } from "../actionTrace";
 import { card, CardHeader } from "../kit";
 import { useCortexNav } from "../nav";
 import { useOutside } from "../shell";
@@ -37,7 +37,7 @@ function closestOption(d: Decision, text: string) {
   const words = new Set(text.toLowerCase().match(/[a-z0-9]+/g) ?? []);
   const scored = d.options.map((o) => ({ o, n: (o.label.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((w) => w.length > 2 && words.has(w)).length }));
   const best = scored.sort((a, b) => b.n - a.n)[0];
-  return best.n > 0 ? best.o : d.options.find((o) => o.recommended)!;
+  return best.n > 0 ? best.o : d.options.find((o) => o.recommended) ?? d.options[0];
 }
 
 function FreeText({ d, onSend, onCancel }: { d: Decision; onSend: (optionId: string, note: string) => void; onCancel: () => void }) {
@@ -209,13 +209,12 @@ function DecisionRow({ d }: { d: Decision }) {
   const { replies, reply } = useLeadership();
   const go = useCortexNav();
   const [expanded, setExpanded] = useState(false);
-  const [trace, setTrace] = useState(false);
   const [freeText, setFreeText] = useState(false);
   const [routes, setRoutes] = useState<RecRoute[]>([]);
   const [runs, setRuns] = useState<{ run: AgentRun; key: number }[]>([]);
   const r = replies[d.id];
   const chosen = r && d.options.find((o) => o.id === r.optionId)!;
-  const rec = d.options.find((o) => o.recommended)!;
+  const rec = d.options.find((o) => o.recommended) ?? d.options[0];
   const from = TODAY_ACTIVITY.find((e) => e.decision === d.n);
 
   const answer = (optionId: string, note?: string) => {
@@ -261,18 +260,20 @@ function DecisionRow({ d }: { d: Decision }) {
             </span>
           ) : (
             <button
-              onClick={() => {
-                setTrace(!(trace && expanded));
-                setExpanded(true);
-              }}
-              aria-expanded={trace && expanded}
-              title={`Suggested: ${rec.label}. Show how Sales AI arrived at it.`}
-              className={`flex min-h-8 min-w-0 flex-1 basis-full items-center gap-2 rounded-md border px-2.5 py-1.5 md:basis-auto text-left text-[12.5px] leading-snug ${trace && expanded ? "border-[#2f6fed]/70 bg-[#2f6fed]/15" : "border-[#2f6fed]/40 bg-[#2f6fed]/10 hover:border-[#2f6fed]/70"}`}
+              onClick={() => setExpanded((e) => !e)}
+              aria-expanded={expanded}
+              title={`Suggested: ${rec.label}`}
+              className="flex min-h-8 min-w-0 flex-1 basis-full items-center gap-2 rounded-md border border-[#2f6fed]/40 bg-[#2f6fed]/10 px-2.5 py-1.5 text-left text-[12.5px] leading-snug hover:border-[#2f6fed]/70 md:basis-auto"
             >
               <span className="shrink-0 font-data text-[10px] uppercase tracking-[0.06em] text-[color:var(--ai-ink)]">Suggested</span>
               <span className="min-w-0 text-cx-text md:truncate">{rec.label}</span>
-              <Workflow className="ml-auto h-3.5 w-3.5 shrink-0 text-[color:var(--ai-ink)]" />
             </button>
+          )}
+          {/* the trace stays after an answer: how Sales AI got to the suggestion is still the record */}
+          {DECISION_TRACES[d.id] && (
+            <span className="shrink-0">
+              <TraceTrigger trace={DECISION_TRACES[d.id]} source="Decision" title={d.question} compact />
+            </span>
           )}
           <span className="md:hidden">
             <ActionMenu d={d} routes={routes} onAnswer={(id) => answer(id)} onFreeText={openFreeText} onRoute={route} />
@@ -320,20 +321,16 @@ function DecisionRow({ d }: { d: Decision }) {
           <div className="min-w-0">
             {freeText ? (
               <FreeText d={d} onSend={(id, note) => answer(id, note)} onCancel={() => setFreeText(false)} />
-            ) : trace ? (
-              <ActionTraceSteps trace={DECISION_TRACES[d.id]} heading="How Sales AI arrived at this suggestion" />
             ) : (
               <div className="rounded-lg border border-cx-line bg-cx-panel px-3.5 py-3">
                 <div className="flex items-start justify-between gap-3">
                   <p className="font-data text-[10.5px] uppercase tracking-[0.08em] text-cx-faint">Sales AI suggests</p>
-                  <span className="-mt-0.5 shrink-0">
+                  <span className="-mt-0.5 flex shrink-0 items-center gap-1.5">
                     <ConfidenceScore confidence={d.confidence} align="right" />
+                    {DECISION_TRACES[d.id] && <TraceTrigger trace={DECISION_TRACES[d.id]} source="Decision" title={d.question} compact />}
                   </span>
                 </div>
                 <p className="mt-1.5 text-[13px] leading-snug text-cx-text">{d.recommendation}</p>
-                <button onClick={() => setTrace(true)} className="mt-2 inline-flex items-center gap-1 text-[12px] text-cx-muted hover:text-cx-text">
-                  <Workflow className="h-3 w-3" /> How this was suggested <ChevronDown className="h-3 w-3" />
-                </button>
               </div>
             )}
           </div>

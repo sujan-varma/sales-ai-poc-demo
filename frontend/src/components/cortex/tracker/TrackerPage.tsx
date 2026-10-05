@@ -33,7 +33,7 @@ import {
 } from "@/data/tracker";
 import { pitchesFor, readSession } from "@/data/pitch";
 import { AgentRunChip } from "../agentRun";
-import { TraceTooltip } from "../actionTrace";
+import { TraceTrigger } from "../actionTrace";
 import { btnPrimary } from "../agentPage";
 import { useHome } from "../HomeState";
 import { card, Dropdown } from "../kit";
@@ -42,7 +42,7 @@ import { useAsmNav } from "../asmNav";
 import { CortexPageRoot, PageFrame, Persona } from "../shell";
 import { CommentBox, Drawer, LeadershipProvider, useHeadNav } from "../leadership/common";
 import { Seg } from "../thermometer/ui";
-import { openSeptemberPlan } from "../map/MapPlansPage";
+import { openSeptemberPlan } from "../map/openPlan";
 import { setOpenPitch } from "../pitch/parts";
 import { TRACKER_OPEN_KEY } from "./loop";
 import { readOct } from "../map/octPlan";
@@ -481,7 +481,7 @@ function TicketDrawer({ t, who, onClose, onChange }: { t: Ticket; who: Who; onCl
       <h2 className="mt-3 text-[20px] font-medium leading-snug text-cx-text">{t.title}</h2>
       <p className="mt-2 text-[13px] leading-relaxed text-cx-muted">{t.description}</p>
       <div className="mt-2">
-        <TraceTooltip trace={ticketTrace(t)} />
+        <TraceTrigger trace={ticketTrace(t)} source="Action" title={t.title} compact />
       </div>
 
       {/* controls */}

@@ -9,32 +9,70 @@ import { ChevronRight, Download, History, Pencil, X } from "lucide-react";
 import { AGENTS } from "@/data/cortexHome";
 import { LBL } from "@/data/labels";
 import { EMPTY_SESSION, PITCH_STATUS, Pitch, kpisFor, pitchTrace, pitchesFor, pointsFor, readSession, sourceLabel } from "@/data/pitch";
-import { TraceTooltip } from "../actionTrace";
-import { AsmAgentPage, DotStatus, PriorityPill, btn, btnPrimary } from "../agentPage";
+import { MAP_LABELS } from "@/data/map";
+import { ORG_PITCHES } from "@/data/org";
+import { TraceTrigger } from "../actionTrace";
+import { AgentPageHeader, AgentPersona, AsmAgentPage, DotStatus, PriorityPill, btn, btnPrimary, useReadOnly } from "../agentPage";
 import { useHome } from "../HomeState";
-import { card, Dropdown } from "../kit";
+import { NoDataCard, card, Dropdown } from "../kit";
 import { useCortexNav } from "../nav";
 import { AgentIcon } from "../primitives";
-import { PointsTable, getOpenPitch, setAdhocOutlet } from "./parts";
+import { PitchOrigin, PointsTable, getOpenPitch, getPitchOrigin, setAdhocOutlet } from "./parts";
+import { openOrgPlan, openSeptemberPlan } from "../map/openPlan";
 
-export function PitchDetailPage() {
+export function PitchDetailPage({ persona = "asm" }: { persona?: AgentPersona }) {
   return (
-    <AsmAgentPage agent="pitch">
+    <AsmAgentPage agent="pitch" persona={persona}>
       <Detail />
     </AsmAgentPage>
+  );
+}
+
+function Crumb() {
+  return (
+    <span className="text-cx-faint" aria-hidden>
+      /
+    </span>
   );
 }
 
 function Detail() {
   const go = useCortexNav();
   const { toast } = useHome();
+  const head = useReadOnly();
+  // the Head of Sales reaches pitches from every region; the ASM only their own
   const [pitches, setPitches] = useState<Pitch[]>(() => pitchesFor(EMPTY_SESSION));
   const [id, setId] = useState<string | null>(null);
+  // set when the pitch was opened from a plan initiative, so the trail names that row
+  const [origin, setOrigin] = useState<PitchOrigin | null>(null);
   useEffect(() => {
-    setPitches(pitchesFor(readSession()));
+    setPitches([...pitchesFor(readSession()), ...(head ? ORG_PITCHES : [])]);
     setId(getOpenPitch());
-  }, []);
+    setOrigin(getPitchOrigin());
+  }, [head]);
   const p = pitches.find((x) => x.id === id) ?? pitches[0];
+  if (!p)
+    return (
+      <div className="pb-24">
+        <AgentPageHeader agent="pitch" title="Pitch" meta="One pitch, as the Sales Executive runs it in SFA" back={{ label: "Pitch", page: head ? "pitch-head" : "pitch" }} />
+        <div className="px-4 sm:px-6">
+          <NoDataCard
+            title="No pitch to show"
+            detail="The backend sent no pitches: no plan initiative has reached an outlet yet. A pitch appears once a plan pushes an initiative to an outlet."
+            source={head ? "GET /api/web/sections/org · ORG_PITCHES" : "GET /api/web/sections/pitch"}
+          />
+        </div>
+      </div>
+    );
+  return <PitchView p={p} origin={origin} />;
+}
+
+/** One pitch that exists — split from <Detail> so its hooks never run on an empty list. */
+function PitchView({ p, origin }: { p: Pitch; origin: PitchOrigin | null }) {
+  const go = useCortexNav();
+  const { toast } = useHome();
+  const head = useReadOnly();
+  const asm = p.asm ?? MAP_LABELS.asm;
   const [accepted, setAccepted] = useState<string[]>([]);
   const [dismissed, setDismissed] = useState(false);
   const points = useMemo(() => pointsFor(p), [p]);
@@ -46,17 +84,50 @@ function Detail() {
   return (
     <div className="pb-24">
       <section className="cx-land-hero px-4 pb-5 pt-14 sm:px-6">
-        <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[12px]">
-          <button onClick={() => go("pitch")} className="text-[#4f86f7] hover:underline">
-            Pitch
-          </button>
-          <span className="text-cx-faint" aria-hidden>
-            /
-          </span>
-          <span className="text-cx-muted">{p.se}</span>
-          <span className="text-cx-faint" aria-hidden>
-            /
-          </span>
+        <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px]">
+          {origin ? (
+            // reached from a plan row: the trail says which plan and which initiative sent it
+            <>
+              <button
+                onClick={() => {
+                  if (origin.planId) openOrgPlan(origin.planId);
+                  go(head ? "map-head" : "map-plans");
+                }}
+                className="text-[#4f86f7] hover:underline"
+              >
+                Market Action Plan
+              </button>
+              <Crumb />
+              <button
+                onClick={() => {
+                  if (origin.planId) openOrgPlan(origin.planId);
+                  else openSeptemberPlan();
+                  go(head ? "map-head" : "map-plans");
+                }}
+                className="text-[#4f86f7] hover:underline"
+              >
+                {origin.plan}
+              </button>
+              {/* an initiative named after its outlet would repeat the tail crumb */}
+              {origin.initiative !== p.outlet && (
+                <>
+                  <Crumb />
+                  <span className="text-cx-muted">
+                    #{origin.n} {origin.initiative}
+                  </span>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <button onClick={() => go(head ? "pitch-head" : "pitch")} className="text-[#4f86f7] hover:underline">
+                Pitch
+              </button>
+              <Crumb />
+              <span className="text-cx-muted">{p.se}</span>
+            </>
+          )}
+          <Crumb />
           <span className="text-cx-text" aria-current="page">
             {p.outlet}
           </span>
@@ -71,7 +142,8 @@ function Detail() {
               <span className="inline-flex h-6 items-center rounded-full border border-cx-line bg-cx-raised px-2 text-[11.5px] font-normal text-cx-muted">Read-only</span>
             </h1>
             <p className="mt-1 text-[12.5px] text-cx-faint">
-              {p.type} · {p.tone} · {p.language} · {p.generated ? `generated ${p.generated}` : "not generated yet"} · Sales Executive {p.se}
+              {p.type} · {p.territory} · {p.language} · {p.generated ? `generated ${p.generated}` : "not generated yet"} · Sales Executive {p.se}
+              {head && <> · ASM {asm}</>}
             </p>
           </div>
           <span className="ml-auto flex flex-wrap items-center gap-1.5">
@@ -88,15 +160,17 @@ function Detail() {
                 {p.status === "visited" ? `Visited ${p.visited?.when} · via SFA` : p.status === "in-sfa" ? `In ${p.se}'s SFA app` : "Not generated"}
               </DotStatus>
             </span>
-            <button
-              onClick={() => {
-                setAdhocOutlet(p.outlet);
-                go("pitch-adhoc");
-              }}
-              className={btnPrimary}
-            >
-              <Pencil className="h-3.5 w-3.5" /> Edit in canvas
-            </button>
+            {!head && (
+              <button
+                onClick={() => {
+                  setAdhocOutlet(p.outlet);
+                  go("pitch-adhoc");
+                }}
+                className={btnPrimary}
+              >
+                <Pencil className="h-3.5 w-3.5" /> Edit in canvas
+              </button>
+            )}
           </span>
         </div>
 
@@ -108,11 +182,11 @@ function Detail() {
             return (
               <span key={i} className="inline-flex items-center gap-2 text-cx-text">
                 {s.kind === "plan" ? (
-                  <button onClick={() => go("map-plans")} className="hover:underline">
+                  <button onClick={() => go(head ? "map-head" : "map-plans")} className="hover:underline">
                     {l.text}
                   </button>
                 ) : (
-                  <button onClick={() => go("thermometer")} className="hover:underline">
+                  <button onClick={() => go(head ? "thermometer-head" : "thermometer")} className="hover:underline">
                     {l.text}
                   </button>
                 )}
@@ -121,7 +195,7 @@ function Detail() {
               </span>
             );
           })}
-          <TraceTooltip trace={pitchTrace(p)} />
+          <TraceTrigger trace={pitchTrace(p)} source="Pitch" title={`${p.outlet} · ${p.type}, ${p.territory}`} compact />
         </div>
 
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-cx-line bg-cx-line lg:grid-cols-4">
@@ -165,6 +239,9 @@ function Detail() {
                       </p>
                       <p className="mt-0.5 text-[12.5px] leading-snug text-cx-text">{n.text}</p>
                     </div>
+                    {head ? (
+                      <span className="text-[12px] text-cx-faint">{asm} decides whether this goes into v{version + 1}</span>
+                    ) : (
                     <span className="flex gap-1.5">
                       <button
                         onClick={() => {
@@ -179,6 +256,7 @@ function Detail() {
                         Dismiss
                       </button>
                     </span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -190,14 +268,16 @@ function Detail() {
           <div className={`${card} px-6 py-12 text-center`}>
             <h2 className="text-[15px] font-medium text-cx-text">Not generated yet</h2>
             <p className="mx-auto mt-1.5 max-w-md text-[13px] text-cx-muted">
-              This pitch is queued from the plan. Create pitches on the Pitch page generates it with the rest of the batch, then it goes to {p.se}'s SFA app.
+              This pitch is queued from the plan. {head ? `${asm}'s next Create pitches batch generates it, then it goes to ${p.se}'s SFA app.` : `Create pitches on the Pitch page generates it with the rest of the batch, then it goes to ${p.se}'s SFA app.`}
             </p>
-            <button onClick={() => go("pitch")} className={`${btnPrimary} mt-5`}>
-              Go to Create pitches
-            </button>
+            {!head && (
+              <button onClick={() => go("pitch")} className={`${btnPrimary} mt-5`}>
+                Go to Create pitches
+              </button>
+            )}
           </div>
         ) : (
-          <PointsTable p={p} points={points} />
+          <PointsTable p={p} points={points} asm={asm} />
         )}
         <p className="text-[12px] text-cx-faint">Capture market intelligence and feedback on the visit in SFA; anything new comes back here and to the plan.</p>
       </div>
