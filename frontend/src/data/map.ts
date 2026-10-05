@@ -67,6 +67,8 @@ export interface Initiative {
   status: InitStatus;
   /** Tracker ticket, when one exists */
   ticket?: string;
+  /** who holds that ticket: an officer, the ASM, or null for a Needs-an-owner group ticket (backend rule) */
+  ticketOwner?: string | null;
   /** "₹L" figures count toward the plan's summary row; the others are counted in their own unit */
   unit: "₹L" | "outlets" | "retailers" | "applicators";
   est: number;

@@ -352,7 +352,10 @@ function PlanDetail({ planId, org, onBack }: { planId: "sep" | "oct"; org?: OrgP
   const { assigned } = useAssignments();
   const withTicket = (i: Initiative): Initiative => {
     const a = assigned[i.id];
-    return a && !i.ticket ? { ...i, ticket: a.id, status: a.st === "closed" ? "ticket-closed" : i.status === "closed" ? "closed" : "escalated" } : i;
+    // an assignment made from this row is its ticket now, ahead of the field action or group ticket it came with
+    return a && i.ticket !== a.id
+      ? { ...i, ticket: a.id, ticketOwner: a.assignee.type === "asm" ? MAP_LABELS.asm : a.assignee.name, status: a.st === "closed" ? "ticket-closed" : i.status === "closed" ? "closed" : "escalated" }
+      : i;
   };
   const base: Initiative[] = org ? orgInitiatives(org.id) : isOct ? octInitiatives(octSaved?.rows ?? freshRows()).map((i) => (assigned[i.id] ? { ...i, ticket: assigned[i.id].id } : i)) : SEP_INITIATIVES;
   // tickets verified in the Action Tracker carry their outcome into the ASM's own September plan
@@ -970,13 +973,19 @@ function TicketLink({ id }: { id: string }) {
   );
 }
 
+/** Who holds a row's ticket: the officer it is with, the ASM, or nobody yet (a Needs-an-owner group ticket). */
+function TicketOwner({ i }: { i: Initiative }) {
+  if (i.ticketOwner === null) return <span className="text-cx-muted">Tracker · needs an owner</span>;
+  const who = i.ticketOwner ?? i.owner;
+  return <>{who === MAP_LABELS.asm ? `${who} (ASM)` : `${who} (Sales Executive)`}</>;
+}
+
 function PushedTo({ i, pitch, removed, origin }: { i: Initiative; pitch: Initiative["pitch"]; removed: boolean; origin: PitchOrigin }) {
   const lines: React.ReactNode[] = [];
   if (i.ticket)
     lines.push(
       <span key="t">
-        {i.owner === MAP_LABELS.asm ? `${i.owner} (ASM)` : `${i.owner} (Sales Executive)`} ·{" "}
-        <TicketLink id={i.ticket} />
+        <TicketOwner i={i} /> <span className="whitespace-nowrap">· <TicketLink id={i.ticket} /></span>
 
       </span>
     );
@@ -1157,7 +1166,7 @@ function Expanded({
             <span className="text-cx-text">
               {i.ticket && (
                 <>
-                  {i.owner} (Sales Executive) · <TicketLink id={i.ticket} />
+                  <TicketOwner i={i} /> <span className="whitespace-nowrap">· <TicketLink id={i.ticket} /></span>
                 </>
               )}
               {i.ticket && pitch && " · "}

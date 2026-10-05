@@ -539,6 +539,29 @@ def build(wb: Workbook, org: Any, ctx: dict[str, Any]) -> dict[str, Any]:
             t.setdefault("links", {})["initiative"] = x["id"]
             ticket_init[t["id"]] = x["id"]
 
+    # A plan row carries the Tracker ticket already covering it, so "Pushed to" names it: an officer's field action on
+    # one of the row's outlets (the row's owner first), else the territory's Needs-an-owner group linked above. The
+    # per-request overlay replaces it with the assignment once someone assigns the row.
+    field = [t for t in tickets if t.get("retailerId")]
+    used: set[str] = set()  # one ticket covers one row
+    for x in SEP_INITIATIVES:
+        if x.get("ticket"):
+            continue
+        rids = {by_name[o]["rid"] for o in ((x["pitch"] or {}).get("outlets") or SUGGESTED_OUTLETS.get(x["id"], [])) if o in by_name}
+        hits = [t for t in field if t["retailerId"] in rids and t["id"] not in used]
+        t = next((t for t in hits if t["assignee"] == x["owner"]), hits[0] if hits else None)
+        group = next((g for g in tickets if ticket_init.get(g["id"]) == x["id"]), None)
+        if t:
+            used.add(t["id"])
+            x["ticket"], x["ticketOwner"] = t["id"], t["assignee"]
+            t.setdefault("links", {}).setdefault("initiative", x["id"])
+        elif group:
+            x["ticket"], x["ticketOwner"] = group["id"], None
+        else:
+            continue
+        if x["status"] != "closed":
+            x["status"] = "escalated"
+
     other = []
     for a in org.asms:
         if a == A:
